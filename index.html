@@ -2,316 +2,556 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Львёнок на батуте</title>
 <style>
-  html,body{margin:0;height:100%;background:#87CEEB;overflow:hidden;font-family:'Comic Sans MS',sans-serif;}
-  canvas{display:block;margin:0 auto;background:linear-gradient(#87CEEB,#FFE4B5);}
-  #hud{position:absolute;top:0;left:0;right:0;padding:10px;color:#fff;text-shadow:2px 2px 0 #000;font-size:20px;pointer-events:none;}
-  #task{font-size:24px;}
-  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-           background:rgba(0,0,0,.6);color:#fff;font-size:32px;text-align:center;flex-direction:column;cursor:pointer;}
+  html,body{
+    margin:0;height:100%;background:#87CEEB;overflow:hidden;
+    font-family:'Comic Sans MS','Segoe UI',sans-serif;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  #wrap{
+    position:relative;width:100vw;height:100vh;
+    display:flex;align-items:center;justify-content:center;
+    background:#87CEEB;
+  }
+  canvas{
+    display:block;background:linear-gradient(#87CEEB 0%,#FFE4B5 100%);
+    max-width:100%;max-height:100%;
+    touch-action:none;
+  }
+  #hud{
+    position:absolute;top:0;left:0;right:0;padding:8px 14px;
+    color:#fff;text-shadow:2px 2px 0 #000,0 0 8px #000;
+    font-size:20px;pointer-events:none;z-index:5;
+    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  }
+  #hudLeft{font-size:18px;line-height:1.4;}
+  #task{
+    font-size:22px;font-weight:bold;text-align:right;line-height:1.4;
+    flex:1;
+  }
+  #overlay{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.7);color:#fff;font-size:30px;text-align:center;
+    flex-direction:column;cursor:pointer;z-index:10;padding:20px;
+  }
   #overlay.hidden{display:none;}
+  #msg{max-width:90%;line-height:1.4;white-space:pre-line;text-shadow:2px 2px 0 #000;}
+  #hint{font-size:16px;margin-top:24px;opacity:.85;}
+  .flash{
+    position:absolute;top:120px;left:50%;transform:translateX(-50%);
+    font-size:38px;color:#fff;text-shadow:3px 3px 0 #000;
+    pointer-events:none;z-index:8;font-weight:bold;
+    animation:pop 0.6s ease-out forwards;
+  }
+  @keyframes pop{
+    0%{opacity:0;transform:translateX(-50%) scale(.6);}
+    20%{opacity:1;transform:translateX(-50%) scale(1.1);}
+    100%{opacity:0;transform:translateX(-50%) scale(1) translateY(-40px);}
+  }
 </style>
 </head>
 <body>
-<div id="hud">
-  <div>❤️ <span id="lives">3</span> | ⏱ <span id="time">20</span>с | Уровень <span id="level">1</span></div>
-  <div id="task">Задание: —</div>
+<div id="wrap">
+  <canvas id="c" width="800" height="600"></canvas>
+  <div id="hud">
+    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">20</span>с<br>Ур. <span id="level">1</span></div>
+    <div id="task">Задание: —</div>
+  </div>
+  <div id="overlay">
+    <div id="msg">🦁 Львёнок на батуте!</div>
+    <div id="hint">Нажми, чтобы начать</div>
+  </div>
 </div>
-<canvas id="c" width="800" height="600"></canvas>
-<div id="overlay" class="hidden"><div id="msg"></div><div style="font-size:18px;margin-top:20px">Нажми, чтобы продолжить</div></div>
 
 <script>
+(() => {
+'use strict';
+
+// ==================== КОНСТАНТЫ ====================
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+const W = canvas.width;
+const H = canvas.height;
 
-// ---------- Типы предметов ----------
+const GRAVITY = 1600;
+const JUMP_HEIGHT = H * (2/3);           // 400px при H=600
+const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT); // ≈ -1130
+
 const TYPES = {
-  red:    {emoji:'🔴', color:'#e74c3c', name:'красный шарик'},
-  blue:   {emoji:'🔵', color:'#3498db', name:'синий шарик'},
-  green:  {emoji:'🟢', color:'#2ecc71', name:'зелёный шарик'},
-  cake:   {emoji:'🍰', color:'#f39c12', name:'тортик'},
-  star:   {emoji:'⭐', color:'#f1c40f', name:'звезда'},
-  apple:  {emoji:'🍎', color:'#c0392b', name:'яблоко'},
-  bomb:   {emoji:'💣', color:'#000',    name:'бомба'}
+  red:    {emoji:'🔴', name:'красный шарик'},
+  blue:   {emoji:'🔵', name:'синий шарик'},
+  green:  {emoji:'🟢', name:'зелёный шарик'},
+  cake:   {emoji:'🍰', name:'тортик'},
+  star:   {emoji:'⭐', name:'звезда'},
+  apple:  {emoji:'🍎', name:'яблоко'},
+  bomb:   {emoji:'💣', name:'бомба'}
 };
 
-// ---------- Уровни (усложняются) ----------
+// ==================== УРОВНИ ====================
+// Каждые 10 уровней — босс (пока в виде усиленного спавна бомб)
 function makeLevel(n){
+  const isBoss = (n % 10 === 0);
   const tasks = [
     [{type:'red', n:3}],
     [{type:'red', n:2},{type:'cake', n:1}],
     [{type:'star', n:3}],
     [{type:'blue', n:2},{type:'apple', n:1}],
     [{type:'red', n:2},{type:'blue', n:2},{type:'star', n:1}],
-    [{type:'cake', n:2},{type:'star', n:2},{type:'apple', n:2}]
+    [{type:'cake', n:2},{type:'star', n:2},{type:'apple', n:2}],
+    [{type:'green', n:3},{type:'cake', n:1}],
+    [{type:'red', n:3},{type:'blue', n:2},{type:'apple', n:1}],
+    [{type:'star', n:4},{type:'cake', n:2}],
+    // Босс — много целей, много бомб
+    [{type:'star', n:5},{type:'cake', n:3},{type:'red', n:3}]
   ];
   const t = tasks[(n-1) % tasks.length];
+
+  // Растущая сложность: время падает, спавн ускоряется, падение быстрее
+  const baseTime   = isBoss ? 35 : 22;
+  const baseSpawn  = isBoss ? 0.7 : 1.0;
+  const baseSpeed  = 130;
+
+  const cycle = Math.floor((n-1)/tasks.length); // 0,1,2... каждые 10 уровней
+
   return {
     task: t,
-    time: Math.max(10, 25 - n*1.5),
-    spawnInterval: Math.max(0.35, 1.1 - n*0.07),
-    fallSpeed: 120 + n*18,
-    bombChance: Math.min(0.35, 0.1 + n*0.03)
+    time: Math.max(12, baseTime - cycle*1.5),
+    spawnInterval: Math.max(0.35, baseSpawn - cycle*0.06 - (isBoss?0:0.01*n)),
+    fallSpeed: baseSpeed + n*14,
+    bombChance: Math.min(0.4, (isBoss?0.3:0.12) + cycle*0.03),
+    isBoss
   };
 }
 
-// ---------- Состояние ----------
-let state = {
-  level:1, lives:3, timeLeft:20,
-  task:[], collected:{},
-  running:false, paused:false,
-  items:[], spawnTimer:0, lastTime:0
+// ==================== СОСТОЯНИЕ ====================
+const state = {
+  level: 1,
+  lives: 3,
+  timeLeft: 20,
+  task: [],
+  collected: {},
+  running: false,
+  items: [],
+  spawnTimer: 0,
+  lastTime: 0,
+  cfg: null
 };
 
-// ---------- Львёнок ----------
+// ==================== ЛЬВЁНОК ====================
 const lion = {
-  x: W/2, y: H-120, w:70, h:70,
-  vy:0, vx:0,
-  onTrampoline:false,
-  jumpPower:-550
+  x: W/2, y: H-120, w: 70, h: 70,
+  vy: 0,
+  jumpPower: JUMP_POWER
 };
+
+const trampoline = { x: W/2 - 130, y: H - 60, w: 260, h: 18 };
+
+// ==================== ВВОД ====================
 const keys = {};
-addEventListener('keydown', e=>keys[e.key]=true);
-addEventListener('keyup',   e=>keys[e.key]=false);
-// Тач/мышь
+addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.key] = false; });
+
 let pointerX = null;
-canvas.addEventListener('mousemove', e=>{pointerX = e.offsetX;});
-canvas.addEventListener('touchmove', e=>{pointerX = e.touches[0].clientX - canvas.getBoundingClientRect().left;}, {passive:true});
+let usePointer = false;
 
-// ---------- Батут ----------
-const trampoline = {x: W/2-120, y: H-60, w:240, h:20};
+function pointerMove(clientX){
+  const rect = canvas.getBoundingClientRect();
+  const scale = W / rect.width;
+  pointerX = (clientX - rect.left) * scale;
+  usePointer = true;
+}
+canvas.addEventListener('mousemove', e => pointerMove(e.clientX));
+canvas.addEventListener('mouseleave', () => { pointerX = null; });
+canvas.addEventListener('touchstart', e => { pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchmove',  e => { pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchend',   () => { pointerX = null; });
 
-// ---------- Запуск уровня ----------
+// ==================== HUD ====================
+const hudLives = document.getElementById('lives');
+const hudTime  = document.getElementById('time');
+const hudLevel = document.getElementById('level');
+const hudTask  = document.getElementById('task');
+const overlay  = document.getElementById('overlay');
+const msgEl    = document.getElementById('msg');
+const hintEl   = document.getElementById('hint');
+
+function updateHUD(){
+  hudLives.textContent = state.lives;
+  hudTime.textContent  = Math.max(0, Math.ceil(state.timeLeft));
+  hudLevel.textContent = state.level + (state.cfg?.isBoss ? ' 👹' : '');
+  const parts = state.task.map(t => {
+    const got = state.collected[t.type] || 0;
+    const done = got >= t.n;
+    return `${done?'✅':''}${got}/${t.n} ${TYPES[t.type].emoji}`;
+  });
+  hudTask.textContent = 'Задание: ' + parts.join('  ');
+}
+
+function flash(text, color='#fff'){
+  const div = document.createElement('div');
+  div.className = 'flash';
+  div.textContent = text;
+  div.style.color = color;
+  document.getElementById('wrap').appendChild(div);
+  setTimeout(() => div.remove(), 650);
+}
+
+// ==================== ЗВУК (заглушки — заменишь .wav/.mp3) ====================
+// В проде: подключи Kenney.nl audio или свои файлы.
+const Sound = {
+  ctx: null,
+  init(){ if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
+  beep(freq, dur, type='sine', vol=0.15){
+    try{
+      this.init();
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.value = vol;
+      g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(); o.stop(this.ctx.currentTime + dur);
+    }catch(e){}
+  },
+  jump(){ this.beep(440, 0.15, 'square', 0.1); },
+  collect(){ this.beep(880, 0.12, 'sine', 0.15); setTimeout(()=>this.beep(1320,0.1), 70); },
+  wrong(){ this.beep(180, 0.25, 'sawtooth', 0.15); },
+  win(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>this.beep(f,0.15,'sine',0.15), i*100)); },
+  fail(){ [400,300,200].forEach((f,i)=>setTimeout(()=>this.beep(f,0.25,'sawtooth',0.15), i*150)); }
+};
+
+// ==================== ЗАПУСК УРОВНЯ ====================
 function startLevel(){
   const cfg = makeLevel(state.level);
+  state.cfg = cfg;
   state.task = cfg.task;
   state.collected = {};
-  cfg.task.forEach(t=>state.collected[t.type]=0);
+  cfg.task.forEach(t => state.collected[t.type] = 0);
   state.timeLeft = cfg.time;
   state.items = [];
-  state.spawnTimer = 0;
-  state.cfg = cfg;
+  state.spawnTimer = 0.3;
+
+  // Позиция львёнка
   lion.x = W/2;
   lion.y = trampoline.y - lion.h;
   lion.vy = lion.jumpPower;
+
   updateHUD();
   state.running = true;
   state.lastTime = performance.now();
   requestAnimationFrame(loop);
 }
 
-function updateHUD(){
-  document.getElementById('lives').textContent = state.lives;
-  document.getElementById('time').textContent = Math.ceil(state.timeLeft);
-  document.getElementById('level').textContent = state.level;
-  const parts = state.task.map(t=>{
-    const got = state.collected[t.type]||0;
-    return `${got}/${t.n} ${TYPES[t.type].emoji}`;
-  });
-  document.getElementById('task').textContent = 'Задание: ' + parts.join('  ');
-}
-
-// ---------- Спавн ----------
+// ==================== СПАВН ====================
 function spawnItem(){
   const cfg = state.cfg;
   let type;
+
   if(Math.random() < cfg.bombChance){
     type = 'bomb';
   } else {
-    // 60% нужный, 40% случайный другой
+    // 60% — нужный предмет, 40% — случайный
     if(Math.random() < 0.6){
-      const need = state.task.filter(t => (state.collected[t.type]||0) < t.n);
-      if(need.length) type = need[Math.floor(Math.random()*need.length)].type;
-      else type = Object.keys(TYPES)[Math.floor(Math.random()*(Object.keys(TYPES).length-1))];
+      const need = state.task.filter(t => (state.collected[t.type] || 0) < t.n);
+      if(need.length){
+        type = need[Math.floor(Math.random() * need.length)].type;
+      } else {
+        const pool = Object.keys(TYPES).filter(k => k !== 'bomb');
+        type = pool[Math.floor(Math.random() * pool.length)];
+      }
     } else {
-      const pool = Object.keys(TYPES).filter(k=>k!=='bomb');
-      type = pool[Math.floor(Math.random()*pool.length)];
+      const pool = Object.keys(TYPES).filter(k => k !== 'bomb');
+      type = pool[Math.floor(Math.random() * pool.length)];
     }
   }
+
   state.items.push({
-    x: 60 + Math.random()*(W-120),
+    x: 60 + Math.random() * (W - 120),
     y: -40,
     r: 22,
     type,
-    vy: cfg.fallSpeed * (0.85 + Math.random()*0.3),
+    vy: cfg.fallSpeed * (0.85 + Math.random() * 0.3),
     rot: 0
   });
 }
 
-// ---------- Обновление ----------
+// ==================== ОБНОВЛЕНИЕ ====================
 function update(dt){
   state.timeLeft -= dt;
-  if(state.timeLeft <= 0){ fail('⏰ Время вышло!'); return; }
-
-  // Движение львёнка
-  const speed = 380;
-  let ax = 0;
-  if(keys['ArrowLeft']||keys['a']||keys['A']) ax -= 1;
-  if(keys['ArrowRight']||keys['d']||keys['D']) ax += 1;
-  if(pointerX!==null){
-    const diff = pointerX - lion.x;
-    if(Math.abs(diff)>5) ax = Math.sign(diff);
+  if(state.timeLeft <= 0){
+    fail('⏰ Время вышло!');
+    return;
   }
-  lion.x += ax*speed*dt;
-  lion.x = Math.max(lion.w/2, Math.min(W-lion.w/2, lion.x));
 
-  // Физика прыжка
-  lion.vy += 1600*dt;
-  lion.y += lion.vy*dt;
-  if(lion.y + lion.h >= trampoline.y && lion.vy>0){
-    if(lion.x + lion.w/2 > trampoline.x && lion.x - lion.w/2 < trampoline.x+trampoline.w){
+  // --- Движение львёнка по X ---
+  const speed = 420;
+  let ax = 0;
+  if(keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
+  if(keys['ArrowRight']|| keys['d'] || keys['D']) ax += 1;
+
+  if(usePointer && pointerX !== null && ax === 0){
+    const diff = pointerX - lion.x;
+    if(Math.abs(diff) > 6){
+      ax = Math.sign(diff) * Math.min(1, Math.abs(diff) / 100);
+    }
+  }
+  // Сброс usePointer при нажатии клавиш
+  if(keys['ArrowLeft']||keys['ArrowRight']||keys['a']||keys['d']||keys['A']||keys['D']){
+    usePointer = false;
+  }
+
+  lion.x += ax * speed * dt;
+  lion.x = Math.max(lion.w/2, Math.min(W - lion.w/2, lion.x));
+
+  // --- Физика прыжка ---
+  lion.vy += GRAVITY * dt;
+  lion.y += lion.vy * dt;
+
+  // Отскок от батута
+  const lionBottom = lion.y + lion.h;
+  if(lionBottom >= trampoline.y && lion.vy > 0){
+    const overTrampoline = lion.x + lion.w/2 > trampoline.x &&
+                           lion.x - lion.w/2 < trampoline.x + trampoline.w;
+    if(overTrampoline){
       lion.y = trampoline.y - lion.h;
       lion.vy = lion.jumpPower;
-    } else {
-      // упал мимо — не критично, отскок от земли
+      Sound.jump();
+    } else if(lionBottom >= H - 10){
+      // Упал мимо — слабый отскок от земли
       lion.y = H - lion.h - 10;
-      lion.vy = lion.jumpPower*0.7;
+      lion.vy = lion.jumpPower * 0.6;
+      Sound.jump();
     }
   }
 
-  // Спавн
+  // --- Спавн ---
   state.spawnTimer -= dt;
   if(state.spawnTimer <= 0){
     spawnItem();
     state.spawnTimer = state.cfg.spawnInterval;
   }
 
-  // Предметы
-  for(let i=state.items.length-1;i>=0;i--){
+  // --- Предметы ---
+  for(let i = state.items.length - 1; i >= 0; i--){
     const it = state.items[i];
-    it.y += it.vy*dt;
-    it.rot += dt*2;
+    it.y += it.vy * dt;
+    it.rot += dt * 2.5;
 
     // Ловля
     const dx = it.x - lion.x;
     const dy = it.y - (lion.y + lion.h/2);
-    if(Math.hypot(dx,dy) < it.r + lion.w/2 - 10){
+    if(Math.hypot(dx, dy) < it.r + lion.w/2 - 12){
       catchItem(it);
-      state.items.splice(i,1);
+      state.items.splice(i, 1);
+      if(!state.running) return;
       continue;
     }
-    if(it.y > H+50) state.items.splice(i,1);
+    if(it.y > H + 60) state.items.splice(i, 1);
   }
 }
 
+// ==================== ЛОВЛЯ ПРЕДМЕТА ====================
 function catchItem(it){
   if(it.type === 'bomb'){
     state.lives--;
-    flash('💣 Бомба!');
-    if(state.lives<=0){ fail('💀 Жизни кончились!'); return; }
+    flash('💣 Бомба!', '#ff5555');
+    Sound.wrong();
+    if(state.lives <= 0){ fail('💀 Жизни кончились!'); return; }
     updateHUD();
     return;
   }
-  const taskItem = state.task.find(t=>t.type===it.type);
+
+  const taskItem = state.task.find(t => t.type === it.type);
   if(taskItem && state.collected[it.type] < taskItem.n){
     state.collected[it.type]++;
+    Sound.collect();
     updateHUD();
     if(state.task.every(t => state.collected[t.type] >= t.n)){
       win();
     }
   } else {
-    // лишний предмет
+    // Лишний предмет
     state.lives--;
-    flash('❌ Лишний предмет!');
-    if(state.lives<=0){ fail('💀 Жизни кончились!'); return; }
+    flash('❌ Лишний!', '#ffaa00');
+    Sound.wrong();
+    if(state.lives <= 0){ fail('💀 Жизни кончились!'); return; }
     updateHUD();
   }
 }
 
-// ---------- Отрисовка ----------
+// ==================== ОТРИСОВКА ====================
 function draw(){
-  ctx.clearRect(0,0,W,H);
-  // облака
-  ctx.fillStyle='rgba(255,255,255,.7)';
-  for(let i=0;i<5;i++){
-    const x = ((i*200 + performance.now()*0.02) % (W+200)) - 100;
-    ctx.beginPath(); ctx.arc(x, 80+i*30, 30, 0, Math.PI*2); ctx.fill();
+  // Фон-градиент
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#87CEEB');
+  grad.addColorStop(1, '#FFE4B5');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Облака
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  const t = performance.now() * 0.02;
+  for(let i = 0; i < 5; i++){
+    const x = ((i * 220 + t) % (W + 200)) - 100;
+    const y = 60 + (i % 3) * 40;
+    ctx.beginPath();
+    ctx.arc(x, y, 32, 0, Math.PI*2);
+    ctx.arc(x + 30, y + 8, 26, 0, Math.PI*2);
+    ctx.arc(x - 30, y + 8, 24, 0, Math.PI*2);
+    ctx.fill();
   }
 
-  // батут
-  ctx.fillStyle='#c0392b';
+  // Солнце
+  ctx.fillStyle = 'rgba(255,230,100,0.9)';
   ctx.beginPath();
-  ctx.roundRect(trampoline.x, trampoline.y, trampoline.w, trampoline.h, 10);
+  ctx.arc(W - 90, 90, 45, 0, Math.PI*2);
   ctx.fill();
-  ctx.fillStyle='#7f1d1d';
-  ctx.fillRect(trampoline.x+10, trampoline.y+trampoline.h, 10, 40);
-  ctx.fillRect(trampoline.x+trampoline.w-20, trampoline.y+trampoline.h, 10, 40);
 
-  // предметы
-  ctx.font='40px serif';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
+  // Батут (резиновое полотно)
+  ctx.fillStyle = '#c0392b';
+  roundRect(trampoline.x, trampoline.y, trampoline.w, trampoline.h, 9);
+  ctx.fill();
+
+  // Пружины/стойки
+  ctx.fillStyle = '#7f1d1d';
+  ctx.fillRect(trampoline.x + 12, trampoline.y + trampoline.h, 10, 40);
+  ctx.fillRect(trampoline.x + trampoline.w - 22, trampoline.y + trampoline.h, 10, 40);
+
+  // Блик на батуте
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  roundRect(trampoline.x + 8, trampoline.y + 3, trampoline.w - 16, 5, 3);
+  ctx.fill();
+
+  // Предметы
+  ctx.font = '40px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   for(const it of state.items){
     ctx.save();
     ctx.translate(it.x, it.y);
-    ctx.rotate(Math.sin(it.rot)*0.3);
+    ctx.rotate(Math.sin(it.rot) * 0.35);
     ctx.fillText(TYPES[it.type].emoji, 0, 0);
     ctx.restore();
   }
 
-  // львёнок
-  ctx.font='70px serif';
-  ctx.fillText('🦁', lion.x, lion.y + lion.h/2);
+  // Львёнок (тень + эмодзи)
+  const shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(lion.x, trampoline.y + 2, 35 * shadowScale, 8 * shadowScale, 0, 0, Math.PI*2);
+  ctx.fill();
 
-  // таймер-полоска
+  ctx.font = '70px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Небольшой наклон в сторону движения
+  const tilt = lion.vx * 0.001;
+  ctx.save();
+  ctx.translate(lion.x, lion.y + lion.h/2);
+  ctx.rotate(tilt);
+  ctx.fillText('🦁', 0, 0);
+  ctx.restore();
+
+  // Таймер-полоска
   const p = Math.max(0, state.timeLeft / state.cfg.time);
-  ctx.fillStyle='#000'; ctx.fillRect(0, H-10, W, 10);
-  ctx.fillStyle = p>0.5?'#2ecc71':p>0.25?'#f39c12':'#e74c3c';
-  ctx.fillRect(0, H-10, W*p, 10);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, H - 10, W, 10);
+  ctx.fillStyle = p > 0.5 ? '#2ecc71' : p > 0.25 ? '#f39c12' : '#e74c3c';
+  ctx.fillRect(0, H - 10, W * p, 10);
 }
 
-// ---------- Цикл ----------
+function roundRect(x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ==================== ЦИКЛ ====================
 function loop(t){
   if(!state.running) return;
-  const dt = Math.min(0.05, (t - state.lastTime)/1000);
+  const dt = Math.min(0.05, (t - state.lastTime) / 1000);
   state.lastTime = t;
   update(dt);
-  if(state.running) draw();
-  if(state.running) requestAnimationFrame(loop);
+  if(state.running){
+    draw();
+    requestAnimationFrame(loop);
+  }
 }
 
-// ---------- Победа / провал ----------
+// ==================== ПОБЕДА / ПОРАЖЕНИЕ ====================
 function win(){
   state.running = false;
-  showOverlay(`🏆 Уровень ${state.level} пройден!`, ()=>{
-    state.level++;
-    startLevel();
-  });
+  Sound.win();
+  // Сохраняем рекорд
+  const record = Number(localStorage.getItem('lion_record') || 0);
+  if(state.level > record) localStorage.setItem('lion_record', state.level);
+
+  const nextLevel = state.level + 1;
+  const nextIsBoss = (nextLevel % 10 === 0);
+  const bossMsg = nextIsBoss ? '\n\n👹 ВПЕРЕДИ БОСС-УРОВЕНЬ!' : '';
+
+  showOverlay(
+    `🏆 Уровень ${state.level} пройден!${bossMsg}\n\nРекорд: ${Math.max(record, state.level)}`,
+    () => {
+      state.level++;
+      startLevel();
+    }
+  );
 }
+
 function fail(reason){
   state.running = false;
-  state.lives = 3;
-  state.level = 1;
-  showOverlay(`${reason}\nПопробуем сначала!`, ()=>{
-    startLevel();
-  });
+  Sound.fail();
+
+  showOverlay(
+    `${reason}\n\nРекорд: ${localStorage.getItem('lion_record') || 1}\nНачинаем сначала?`,
+    () => {
+      state.lives = 3;
+      state.level = 1;
+      startLevel();
+    }
+  );
 }
 
 function showOverlay(text, cb){
-  const o = document.getElementById('overlay');
-  document.getElementById('msg').textContent = text;
-  o.classList.remove('hidden');
-  o.onclick = ()=>{ o.classList.add('hidden'); cb(); };
+  msgEl.textContent = text;
+  hintEl.textContent = 'Нажми, чтобы продолжить';
+  overlay.classList.remove('hidden');
+  overlay.onclick = () => {
+    overlay.classList.add('hidden');
+    cb();
+  };
 }
 
-function flash(txt){
-  const o = document.getElementById('overlay');
-  // быстрый флеш без паузы
-  const div = document.createElement('div');
-  div.textContent = txt;
-  div.style.cssText='position:absolute;top:100px;left:50%;transform:translateX(-50%);font-size:36px;color:#fff;text-shadow:2px 2px 0 #000;pointer-events:none;';
-  document.body.appendChild(div);
-  setTimeout(()=>div.remove(), 600);
-}
-
-// Старт
-document.getElementById('overlay').classList.remove('hidden');
-document.getElementById('msg').textContent = '🦁 Львёнок на батуте!\nЛови нужные предметы, избегай лишних и бомб!';
-document.getElementById('overlay').onclick = ()=>{
-  document.getElementById('overlay').classList.add('hidden');
+// ==================== СТАРТ ====================
+overlay.onclick = () => {
+  overlay.classList.add('hidden');
   startLevel();
 };
+
+// Ресайз канваса под окно (адаптив)
+function fitCanvas(){
+  const wrap = document.getElementById('wrap');
+  const wrapW = wrap.clientWidth;
+  const wrapH = wrap.clientHeight;
+  const scale = Math.min(wrapW / W, wrapH / H);
+  canvas.style.width  = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+addEventListener('resize', fitCanvas);
+fitCanvas();
+
+})();
 </script>
 </body>
 </html>
