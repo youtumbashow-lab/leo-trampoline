@@ -41,7 +41,7 @@
   #combo.show{opacity:1;}
   #overlay{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.75);color:#fff;font-size:28px;text-align:center;
+    background:rgba(0,0,0,.75);color:#fff;font-size:26px;text-align:center;
     flex-direction:column;cursor:pointer;z-index:10;padding:20px;
   }
   #overlay.hidden{display:none;}
@@ -72,7 +72,7 @@
 <div id="wrap">
   <canvas id="c" width="800" height="600"></canvas>
   <div id="hud">
-    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">40</span>с<br>Задание <span id="taskNum">1</span></div>
+    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">60</span>с<br>Задание <span id="taskNum">1</span></div>
     <div id="task">Задание: —</div>
   </div>
   <div id="combo"></div>
@@ -97,11 +97,23 @@ const GRAVITY = 1600;
 const JUMP_HEIGHT = H * (2/3);
 const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 
-const START_TIME = 40;       // стартовый запас времени
-const TIME_BONUS_BASE = 6;   // базовая награда за задание
-const TIME_PENALTY = 2;      // штраф за ошибку
-const TIME_CLOCK_BONUS = 3;  // бонус от ⏰
-const MAX_TIME = 99;
+// --- Балансировка длинной сессии ---
+const START_TIME       = 60;
+const TIME_BONUS_BASE  = 12;
+const TIME_BONUS_COMBO = 2;
+const TIME_PENALTY     = 1;
+const TIME_CLOCK_BONUS = 6;
+const MAX_TIME         = 180;
+const BASE_TIME_SCALE  = 0.85;
+const LOW_LIFE_SCALE   = 0.6;
+const PAUSE_BETWEEN    = 0.6;
+
+// --- Жизни и передышки ---
+const MAX_LIVES           = 5;
+const LIFE_REGEN_EVERY    = 8;    // +1 жизнь каждые N заданий
+const BREATHER_EVERY      = 5;    // каждые N заданий — передышка
+const BREATHER_DURATION   = 12;   // сек передышки
+const BREATHER_LOOSEN     = 1.5;  // во сколько раз проще в передышке
 
 const TYPES = {
   red:    {emoji:'🔴', name:'красный шарик'},
@@ -114,10 +126,9 @@ const TYPES = {
   clock:  {emoji:'⏰', name:'часы'}
 };
 
-// ==================== ЗАДАНИЯ (по индексу прогресса) ====================
-// Возвращает задание исходя из номера текущего задания (1,2,3...)
+// ==================== ЗАДАНИЯ ====================
+// Сложность растёт медленно: используем sqrt для плавности
 function makeTask(num){
-  // Пул шаблонов — циклический, но с ростом количества
   const templates = [
     [{type:'red', n:3}],
     [{type:'red', n:2},{type:'cake', n:1}],
@@ -132,21 +143,30 @@ function makeTask(num){
   ];
   const cycle = Math.floor((num - 1) / templates.length);
   const tmpl = templates[(num - 1) % templates.length];
-  // Каждый цикл +1 к количеству одного из типов
+
+  // Рост количества только каждые 3 цикла (медленнее)
+  const extra = Math.floor(cycle / 3);
+
   return tmpl.map((t, i) => ({
     type: t.type,
-    n: t.n + (cycle > 0 && i === 0 ? cycle : 0)
+    n: t.n + (extra > 0 && i === 0 ? extra : 0)
   }));
 }
 
-// Настройки сложности от номера задания
+// Плавный рост сложности от номера задания
 function taskDifficulty(num){
+  const smooth = Math.sqrt(num); // 1 → 1, 9 → 3, 25 → 5, 100 → 10
   return {
-    spawnInterval: Math.max(0.3, 1.0 - num * 0.03),
-    fallSpeed: 130 + num * 10,
-    bombChance: Math.min(0.35, 0.1 + num * 0.02),
-    clockChance: 0.05
+    spawnInterval: Math.max(0.55, 1.1 - smooth * 0.06),
+    fallSpeed:     120 + smooth * 9,
+    bombChance:    Math.min(0.18, 0.05 + smooth * 0.012),
+    clockChance:   0.08
   };
+}
+
+// Проверка: сейчас передышка?
+function isBreather(num){
+  return num > 0 && num % BREATHER_EVERY === 0;
 }
 
 // ==================== СОСТОЯНИЕ ====================
@@ -154,17 +174,21 @@ const state = {
   lives: 3,
   timeLeft: START_TIME,
   taskNum: 1,
+  tasksDone: 0,               // счётчик выполненных (для регенерации жизни)
   task: [],
   collected: {},
-  combo: 0,          // подряд выполненных заданий без ошибок
+  combo: 0,
   running: false,
   items: [],
   spawnTimer: 0,
   lastTime: 0,
   cfg: null,
   started: false,
+  pauseTimer: 0,
+  breatherTimer: 0,           // таймер текущей передышки
   bestTasks: Number(localStorage.getItem('lion_bestTasks') || 0),
-  bestTime: Number(localStorage.getItem('lion_bestTime') || 0)
+  bestTime: Number(localStorage.getItem('lion_bestTime') || 0),
+  bestSession: Number(localStorage.getItem('lion_bestSession') || 0)
 };
 
 // ==================== ЛЬВЁНОК ====================
@@ -219,7 +243,11 @@ function updateHUD(){
     const done = got >= t.n;
     return `${done?'✅':''}${got}/${t.n} ${TYPES[t.type].emoji}`;
   });
-  hudTask.textContent = 'Задание: ' + parts.join('  ');
+  let text = 'Задание: ' + parts.join('  ');
+  if(state.breatherTimer > 0){
+    text = `☕ ПЕРЕДЫШКА ${Math.ceil(state.breatherTimer)}с  •  ` + text;
+  }
+  hudTask.textContent = text;
 }
 
 function showCombo(){
@@ -260,7 +288,8 @@ const Sound = {
   wrong(){ this.beep(180, 0.25, 'sawtooth', 0.15); },
   win(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>this.beep(f,0.15,'sine',0.15), i*100)); },
   fail(){ [400,300,200].forEach((f,i)=>setTimeout(()=>this.beep(f,0.25,'sawtooth',0.15), i*150)); },
-  clock(){ this.beep(1200,0.08,'sine',0.15); setTimeout(()=>this.beep(1600,0.08),70); }
+  clock(){ this.beep(1200,0.08,'sine',0.15); setTimeout(()=>this.beep(1600,0.08),70); },
+  regen(){ [660,880,1100].forEach((f,i)=>setTimeout(()=>this.beep(f,0.2,'sine',0.18), i*100)); }
 };
 
 // ==================== ЗАПУСК ИГРЫ ====================
@@ -268,9 +297,12 @@ function startGame(){
   state.lives = 3;
   state.timeLeft = START_TIME;
   state.taskNum = 1;
+  state.tasksDone = 0;
   state.combo = 0;
   state.items = [];
   state.spawnTimer = 0.3;
+  state.pauseTimer = 0;
+  state.breatherTimer = 0;
 
   lion.x = W/2;
   lion.y = trampoline.y - lion.h;
@@ -282,24 +314,37 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 
-// ==================== СЛЕДУЮЩЕЕ ЗАДАНИЕ ====================
 function nextTask(){
   state.task = makeTask(state.taskNum);
   state.collected = {};
   state.task.forEach(t => state.collected[t.type] = 0);
   state.cfg = taskDifficulty(state.taskNum);
+
+  // Передышка каждые N заданий
+  if(isBreather(state.taskNum)){
+    state.breatherTimer = BREATHER_DURATION;
+    flash('☕ Передышка!', '#7CFC00');
+  } else {
+    state.breatherTimer = 0;
+  }
+
   updateHUD();
 }
 
 // ==================== СПАВН ====================
 function spawnItem(){
   const cfg = state.cfg;
-  let type;
 
+  // В передышке — все проще
+  const inBreather = state.breatherTimer > 0;
+  const bombChance = inBreather ? cfg.bombChance / BREATHER_LOOSEN : cfg.bombChance;
+  const spawnMul = inBreather ? BREATHER_LOOSEN : 1;
+
+  let type;
   const r = Math.random();
-  if(r < cfg.bombChance){
+  if(r < bombChance){
     type = 'bomb';
-  } else if(r < cfg.bombChance + cfg.clockChance){
+  } else if(r < bombChance + cfg.clockChance){
     type = 'clock';
   } else {
     if(Math.random() < 0.6){
@@ -328,8 +373,25 @@ function spawnItem(){
 
 // ==================== ОБНОВЛЕНИЕ ====================
 function update(dt){
-  // Замедление времени при 1 жизни — шанс отыграться
-  const timeScale = state.lives === 1 ? 0.6 : 1.0;
+  // Пауза после выполненного задания
+  if(state.pauseTimer > 0){
+    state.pauseTimer -= dt;
+    updateLion(dt, 1.0);
+    return;
+  }
+
+  // Передышка тикает и во время игры
+  if(state.breatherTimer > 0){
+    state.breatherTimer -= dt;
+    if(state.breatherTimer <= 0){
+      state.breatherTimer = 0;
+      flash('Передышка окончена', '#ffaa00');
+    }
+    updateHUD();
+  }
+
+  const lifeScale = state.lives === 1 ? LOW_LIFE_SCALE : 1.0;
+  const timeScale = BASE_TIME_SCALE * lifeScale;
   state.timeLeft -= dt * timeScale;
   if(state.timeLeft <= 0){
     state.timeLeft = 0;
@@ -339,7 +401,35 @@ function update(dt){
   }
   updateHUD();
 
-  // Движение
+  updateLion(dt, timeScale);
+
+  // Спавн — в передышке реже
+  state.spawnTimer -= dt;
+  if(state.spawnTimer <= 0){
+    spawnItem();
+    let interval = state.cfg.spawnInterval;
+    if(state.breatherTimer > 0) interval *= BREATHER_LOOSEN;
+    state.spawnTimer = interval;
+  }
+
+  for(let i = state.items.length - 1; i >= 0; i--){
+    const it = state.items[i];
+    it.y += it.vy * dt * timeScale;
+    it.rot += dt * 2.5;
+
+    const dx = it.x - lion.x;
+    const dy = it.y - (lion.y + lion.h/2);
+    if(Math.hypot(dx, dy) < it.r + lion.w/2 - 12){
+      catchItem(it);
+      state.items.splice(i, 1);
+      if(!state.running) return;
+      continue;
+    }
+    if(it.y > H + 60) state.items.splice(i, 1);
+  }
+}
+
+function updateLion(dt, timeScale){
   const speed = 420;
   let ax = 0;
   if(keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
@@ -358,7 +448,6 @@ function update(dt){
   lion.x += ax * speed * dt;
   lion.x = Math.max(lion.w/2, Math.min(W - lion.w/2, lion.x));
 
-  // Физика
   lion.vy += GRAVITY * dt * timeScale;
   lion.y += lion.vy * dt * timeScale;
 
@@ -376,35 +465,12 @@ function update(dt){
       Sound.jump();
     }
   }
-
-  // Спавн
-  state.spawnTimer -= dt;
-  if(state.spawnTimer <= 0){
-    spawnItem();
-    state.spawnTimer = state.cfg.spawnInterval;
-  }
-
-  // Предметы
-  for(let i = state.items.length - 1; i >= 0; i--){
-    const it = state.items[i];
-    it.y += it.vy * dt * timeScale;
-    it.rot += dt * 2.5;
-
-    const dx = it.x - lion.x;
-    const dy = it.y - (lion.y + lion.h/2);
-    if(Math.hypot(dx, dy) < it.r + lion.w/2 - 12){
-      catchItem(it);
-      state.items.splice(i, 1);
-      if(!state.running) return;
-      continue;
-    }
-    if(it.y > H + 60) state.items.splice(i, 1);
-  }
 }
 
 // ==================== ЛОВЛЯ ====================
 function catchItem(it){
-  // Бонус времени
+  const inBreather = state.breatherTimer > 0;
+
   if(it.type === 'clock'){
     state.timeLeft = Math.min(MAX_TIME, state.timeLeft + TIME_CLOCK_BONUS);
     flash(`⏰ +${TIME_CLOCK_BONUS}с`, '#7CFC00');
@@ -413,12 +479,15 @@ function catchItem(it){
     return;
   }
 
-  // Бомба — штраф
   if(it.type === 'bomb'){
-    state.lives--;
-    state.combo = 0;
-    state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
-    flash(`💣 −${TIME_PENALTY}с  ❤️-1`, '#ff5555');
+    if(!inBreather){
+      state.lives--;
+      state.combo = 0;
+      state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
+      flash(`💣 −${TIME_PENALTY}с  ❤️-1`, '#ff5555');
+    } else {
+      flash(`💣 (передышка)`, '#ffaa00');
+    }
     Sound.wrong();
     if(state.lives <= 0){ gameOver(); return; }
     updateHUD();
@@ -434,11 +503,14 @@ function catchItem(it){
       completeTask();
     }
   } else {
-    // Лишний
-    state.lives--;
-    state.combo = 0;
-    state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
-    flash(`❌ Лишний  −${TIME_PENALTY}с  ❤️-1`, '#ffaa00');
+    if(!inBreather){
+      state.lives--;
+      state.combo = 0;
+      state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
+      flash(`❌ Лишний  −${TIME_PENALTY}с  ❤️-1`, '#ffaa00');
+    } else {
+      flash(`❌ (передышка)`, '#ffaa00');
+    }
     Sound.wrong();
     if(state.lives <= 0){ gameOver(); return; }
     updateHUD();
@@ -448,13 +520,22 @@ function catchItem(it){
 // ==================== ЗАДАНИЕ ВЫПОЛНЕНО ====================
 function completeTask(){
   state.combo++;
-  const bonus = TIME_BONUS_BASE + state.combo;   // чем длиннее серия, тем больше времени
+  state.tasksDone++;
+
+  const bonus = TIME_BONUS_BASE + state.combo * TIME_BONUS_COMBO;
   state.timeLeft = Math.min(MAX_TIME, state.timeLeft + bonus);
   flash(`✅ +${bonus}с  (комбо ×${state.combo})`, '#7CFC00');
   Sound.win();
   showCombo();
 
-  // Сохраняем рекорды
+  // Регенерация жизни
+  if(state.tasksDone > 0 && state.tasksDone % LIFE_REGEN_EVERY === 0 && state.lives < MAX_LIVES){
+    state.lives++;
+    flash(`❤️ +1 жизнь!`, '#ff69b4');
+    Sound.regen();
+  }
+
+  // Рекорды
   if(state.taskNum > state.bestTasks){
     state.bestTasks = state.taskNum;
     localStorage.setItem('lion_bestTasks', state.bestTasks);
@@ -466,6 +547,9 @@ function completeTask(){
 
   state.taskNum++;
   nextTask();
+
+  state.pauseTimer = PAUSE_BETWEEN;
+  state.items = [];
 }
 
 // ==================== ОТРИСОВКА ====================
@@ -516,7 +600,7 @@ function draw(){
     ctx.restore();
   }
 
-  // Тень львёнка
+  // Тень
   const shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
@@ -532,12 +616,30 @@ function draw(){
   ctx.fillText('🦁', 0, 0);
   ctx.restore();
 
-  // Таймер-полоска
+  // Пауза
+  if(state.pauseTimer > 0){
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(0, H/2 - 40, W, 80);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⏸ Готовься!', W/2, H/2);
+  }
+
+  // Индикатор передышки (мягкая рамка)
+  if(state.breatherTimer > 0){
+    ctx.strokeStyle = 'rgba(124,252,0,0.6)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W-6, H-6);
+  }
+
+  // Таймер
   const p = Math.max(0, Math.min(1, state.timeLeft / MAX_TIME));
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, H - 10, W, 10);
-  const color = state.timeLeft < 5 ? '#e74c3c' :
-                state.timeLeft < 12 ? '#f39c12' : '#2ecc71';
+  const color = state.timeLeft < 8 ? '#e74c3c' :
+                state.timeLeft < 20 ? '#f39c12' : '#2ecc71';
   ctx.fillStyle = color;
   ctx.fillRect(0, H - 10, W * p, 10);
 }
@@ -569,13 +671,20 @@ function gameOver(){
   state.running = false;
   Sound.fail();
 
+  const sessionTasks = state.taskNum - 1;
+  if(sessionTasks > state.bestSession){
+    state.bestSession = sessionTasks;
+    localStorage.setItem('lion_bestSession', state.bestSession);
+  }
+
   const recordMsg =
-    `🏆 Лучший результат:\n` +
+    `🏆 Рекорды:\n` +
     `Заданий подряд: ${state.bestTasks}\n` +
-    `Макс. время: ${state.bestTime}с\n\n` +
+    `Макс. время: ${state.bestTime}с\n` +
+    `Лучшая сессия: ${state.bestSession} заданий\n\n` +
     `В этот раз:\n` +
-    `Заданий: ${state.taskNum - 1}\n` +
-    `Время: ${Math.floor(state.timeLeft)}с`;
+    `Заданий: ${sessionTasks}\n` +
+    `Осталось времени: ${Math.floor(state.timeLeft)}с`;
 
   showOverlay(recordMsg, 'Нажми, чтобы играть заново', true, () => {
     startGame();
@@ -596,8 +705,10 @@ function showOverlay(text, hint, showReset, cb){
     e.stopPropagation();
     localStorage.removeItem('lion_bestTasks');
     localStorage.removeItem('lion_bestTime');
+    localStorage.removeItem('lion_bestSession');
     state.bestTasks = 0;
     state.bestTime = 0;
+    state.bestSession = 0;
     flash('Рекорды сброшены', '#fff');
   };
 }
