@@ -40,6 +40,12 @@
   #overlay.hidden{display:none;}
   #msg{max-width:90%;line-height:1.4;white-space:pre-line;text-shadow:2px 2px 0 #000;}
   #hint{font-size:16px;margin-top:24px;opacity:.85;}
+  #resetBtn{
+    margin-top:20px;padding:10px 24px;font-size:16px;
+    background:#e74c3c;color:#fff;border:2px solid #fff;border-radius:8px;
+    cursor:pointer;font-family:inherit;display:none;
+  }
+  #resetBtn:hover{background:#c0392b;}
   .flash{
     position:absolute;top:120px;left:50%;transform:translateX(-50%);
     font-size:38px;color:#fff;text-shadow:3px 3px 0 #000;
@@ -63,6 +69,7 @@
   <div id="overlay">
     <div id="msg">🦁 Львёнок на батуте!</div>
     <div id="hint">Нажми, чтобы начать</div>
+    <button id="resetBtn">Начать заново</button>
   </div>
 </div>
 
@@ -77,8 +84,8 @@ const W = canvas.width;
 const H = canvas.height;
 
 const GRAVITY = 1600;
-const JUMP_HEIGHT = H * (2/3);           // 400px при H=600
-const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT); // ≈ -1130
+const JUMP_HEIGHT = H * (2/3);
+const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 
 const TYPES = {
   red:    {emoji:'🔴', name:'красный шарик'},
@@ -91,7 +98,6 @@ const TYPES = {
 };
 
 // ==================== УРОВНИ ====================
-// Каждые 10 уровней — босс (пока в виде усиленного спавна бомб)
 function makeLevel(n){
   const isBoss = (n % 10 === 0);
   const tasks = [
@@ -104,17 +110,14 @@ function makeLevel(n){
     [{type:'green', n:3},{type:'cake', n:1}],
     [{type:'red', n:3},{type:'blue', n:2},{type:'apple', n:1}],
     [{type:'star', n:4},{type:'cake', n:2}],
-    // Босс — много целей, много бомб
     [{type:'star', n:5},{type:'cake', n:3},{type:'red', n:3}]
   ];
   const t = tasks[(n-1) % tasks.length];
 
-  // Растущая сложность: время падает, спавн ускоряется, падение быстрее
   const baseTime   = isBoss ? 35 : 22;
   const baseSpawn  = isBoss ? 0.7 : 1.0;
   const baseSpeed  = 130;
-
-  const cycle = Math.floor((n-1)/tasks.length); // 0,1,2... каждые 10 уровней
+  const cycle = Math.floor((n-1)/tasks.length);
 
   return {
     task: t,
@@ -137,7 +140,8 @@ const state = {
   items: [],
   spawnTimer: 0,
   lastTime: 0,
-  cfg: null
+  cfg: null,
+  started: false
 };
 
 // ==================== ЛЬВЁНОК ====================
@@ -180,6 +184,7 @@ const hudTask  = document.getElementById('task');
 const overlay  = document.getElementById('overlay');
 const msgEl    = document.getElementById('msg');
 const hintEl   = document.getElementById('hint');
+const resetBtn = document.getElementById('resetBtn');
 
 function updateHUD(){
   hudLives.textContent = state.lives;
@@ -202,8 +207,7 @@ function flash(text, color='#fff'){
   setTimeout(() => div.remove(), 650);
 }
 
-// ==================== ЗВУК (заглушки — заменишь .wav/.mp3) ====================
-// В проде: подключи Kenney.nl audio или свои файлы.
+// ==================== ЗВУК ====================
 const Sound = {
   ctx: null,
   init(){ if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
@@ -237,7 +241,6 @@ function startLevel(){
   state.items = [];
   state.spawnTimer = 0.3;
 
-  // Позиция львёнка
   lion.x = W/2;
   lion.y = trampoline.y - lion.h;
   lion.vy = lion.jumpPower;
@@ -256,7 +259,6 @@ function spawnItem(){
   if(Math.random() < cfg.bombChance){
     type = 'bomb';
   } else {
-    // 60% — нужный предмет, 40% — случайный
     if(Math.random() < 0.6){
       const need = state.task.filter(t => (state.collected[t.type] || 0) < t.n);
       if(need.length){
@@ -289,7 +291,6 @@ function update(dt){
     return;
   }
 
-  // --- Движение львёнка по X ---
   const speed = 420;
   let ax = 0;
   if(keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
@@ -301,7 +302,6 @@ function update(dt){
       ax = Math.sign(diff) * Math.min(1, Math.abs(diff) / 100);
     }
   }
-  // Сброс usePointer при нажатии клавиш
   if(keys['ArrowLeft']||keys['ArrowRight']||keys['a']||keys['d']||keys['A']||keys['D']){
     usePointer = false;
   }
@@ -309,11 +309,9 @@ function update(dt){
   lion.x += ax * speed * dt;
   lion.x = Math.max(lion.w/2, Math.min(W - lion.w/2, lion.x));
 
-  // --- Физика прыжка ---
   lion.vy += GRAVITY * dt;
   lion.y += lion.vy * dt;
 
-  // Отскок от батута
   const lionBottom = lion.y + lion.h;
   if(lionBottom >= trampoline.y && lion.vy > 0){
     const overTrampoline = lion.x + lion.w/2 > trampoline.x &&
@@ -323,27 +321,23 @@ function update(dt){
       lion.vy = lion.jumpPower;
       Sound.jump();
     } else if(lionBottom >= H - 10){
-      // Упал мимо — слабый отскок от земли
       lion.y = H - lion.h - 10;
       lion.vy = lion.jumpPower * 0.6;
       Sound.jump();
     }
   }
 
-  // --- Спавн ---
   state.spawnTimer -= dt;
   if(state.spawnTimer <= 0){
     spawnItem();
     state.spawnTimer = state.cfg.spawnInterval;
   }
 
-  // --- Предметы ---
   for(let i = state.items.length - 1; i >= 0; i--){
     const it = state.items[i];
     it.y += it.vy * dt;
     it.rot += dt * 2.5;
 
-    // Ловля
     const dx = it.x - lion.x;
     const dy = it.y - (lion.y + lion.h/2);
     if(Math.hypot(dx, dy) < it.r + lion.w/2 - 12){
@@ -356,7 +350,7 @@ function update(dt){
   }
 }
 
-// ==================== ЛОВЛЯ ПРЕДМЕТА ====================
+// ==================== ЛОВЛЯ ====================
 function catchItem(it){
   if(it.type === 'bomb'){
     state.lives--;
@@ -376,7 +370,6 @@ function catchItem(it){
       win();
     }
   } else {
-    // Лишний предмет
     state.lives--;
     flash('❌ Лишний!', '#ffaa00');
     Sound.wrong();
@@ -387,14 +380,12 @@ function catchItem(it){
 
 // ==================== ОТРИСОВКА ====================
 function draw(){
-  // Фон-градиент
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, '#87CEEB');
   grad.addColorStop(1, '#FFE4B5');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Облака
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   const t = performance.now() * 0.02;
   for(let i = 0; i < 5; i++){
@@ -407,28 +398,23 @@ function draw(){
     ctx.fill();
   }
 
-  // Солнце
   ctx.fillStyle = 'rgba(255,230,100,0.9)';
   ctx.beginPath();
   ctx.arc(W - 90, 90, 45, 0, Math.PI*2);
   ctx.fill();
 
-  // Батут (резиновое полотно)
   ctx.fillStyle = '#c0392b';
   roundRect(trampoline.x, trampoline.y, trampoline.w, trampoline.h, 9);
   ctx.fill();
 
-  // Пружины/стойки
   ctx.fillStyle = '#7f1d1d';
   ctx.fillRect(trampoline.x + 12, trampoline.y + trampoline.h, 10, 40);
   ctx.fillRect(trampoline.x + trampoline.w - 22, trampoline.y + trampoline.h, 10, 40);
 
-  // Блик на батуте
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   roundRect(trampoline.x + 8, trampoline.y + 3, trampoline.w - 16, 5, 3);
   ctx.fill();
 
-  // Предметы
   ctx.font = '40px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -440,7 +426,6 @@ function draw(){
     ctx.restore();
   }
 
-  // Львёнок (тень + эмодзи)
   const shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
@@ -450,15 +435,11 @@ function draw(){
   ctx.font = '70px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // Небольшой наклон в сторону движения
-  const tilt = lion.vx * 0.001;
   ctx.save();
   ctx.translate(lion.x, lion.y + lion.h/2);
-  ctx.rotate(tilt);
   ctx.fillText('🦁', 0, 0);
   ctx.restore();
 
-  // Таймер-полоска
   const p = Math.max(0, state.timeLeft / state.cfg.time);
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, H - 10, W, 10);
@@ -488,13 +469,14 @@ function loop(t){
   }
 }
 
-// ==================== ПОБЕДА / ПОРАЖЕНИЕ ====================
+// ==================== ПОБЕДА / ПРОВАЛ ====================
 function win(){
   state.running = false;
   Sound.win();
-  // Сохраняем рекорд
+
   const record = Number(localStorage.getItem('lion_record') || 0);
   if(state.level > record) localStorage.setItem('lion_record', state.level);
+  localStorage.setItem('lion_progress', state.level + 1);
 
   const nextLevel = state.level + 1;
   const nextIsBoss = (nextLevel % 10 === 0);
@@ -502,6 +484,8 @@ function win(){
 
   showOverlay(
     `🏆 Уровень ${state.level} пройден!${bossMsg}\n\nРекорд: ${Math.max(record, state.level)}`,
+    'Нажми, чтобы продолжить',
+    false,
     () => {
       state.level++;
       startLevel();
@@ -514,37 +498,52 @@ function fail(reason){
   Sound.fail();
 
   showOverlay(
-    `${reason}\n\nРекорд: ${localStorage.getItem('lion_record') || 1}\nНачинаем сначала?`,
+    `${reason}\n\nПовторяем уровень ${state.level}\nРекорд: ${localStorage.getItem('lion_record') || 1}`,
+    'Нажми, чтобы повторить уровень',
+    true,
     () => {
       state.lives = 3;
-      state.level = 1;
       startLevel();
     }
   );
 }
 
-function showOverlay(text, cb){
+function showOverlay(text, hint, showReset, cb){
   msgEl.textContent = text;
-  hintEl.textContent = 'Нажми, чтобы продолжить';
+  hintEl.textContent = hint;
+  resetBtn.style.display = showReset ? 'inline-block' : 'none';
   overlay.classList.remove('hidden');
-  overlay.onclick = () => {
+  overlay.onclick = (e) => {
+    if(e.target === resetBtn) return;
     overlay.classList.add('hidden');
     cb();
+  };
+  resetBtn.onclick = (e) => {
+    e.stopPropagation();
+    localStorage.removeItem('lion_progress');
+    localStorage.removeItem('lion_record');
+    state.level = 1;
+    state.lives = 3;
+    overlay.classList.add('hidden');
+    startLevel();
   };
 }
 
 // ==================== СТАРТ ====================
 overlay.onclick = () => {
   overlay.classList.add('hidden');
+  if(!state.started){
+    const saved = Number(localStorage.getItem('lion_progress') || 1);
+    state.level = saved;
+    state.started = true;
+  }
   startLevel();
 };
 
-// Ресайз канваса под окно (адаптив)
+// Ресайз
 function fitCanvas(){
   const wrap = document.getElementById('wrap');
-  const wrapW = wrap.clientWidth;
-  const wrapH = wrap.clientHeight;
-  const scale = Math.min(wrapW / W, wrapH / H);
+  const scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H);
   canvas.style.width  = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
 }
