@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Львёнок на батуте222</title>
+<title>Львёнок на батуте</title>
 <style>
   html,body{margin:0;height:100%;background:#87CEEB;overflow:hidden;
     font-family:'Comic Sans MS','Segoe UI',sans-serif;
@@ -38,7 +38,7 @@
 <div id="wrap">
   <canvas id="c" width="800" height="600"></canvas>
   <div id="hud">
-    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">60</span>с<br>Задание <span id="taskNum">1</span></div>
+    <div id="hudLeft">❤️ <span id="lives">5</span><br>⏱ <span id="time">60</span>с<br>Задание <span id="taskNum">1</span></div>
     <div id="task">Задание: —</div>
   </div>
   <div id="combo"></div>
@@ -65,14 +65,21 @@ var JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 var START_TIME = 60, TIME_BONUS_BASE = 12, TIME_BONUS_COMBO = 2;
 var TIME_PENALTY = 1, TIME_CLOCK_BONUS = 6, MAX_TIME = 180;
 var BASE_TIME_SCALE = 0.85, LOW_LIFE_SCALE = 0.6, PAUSE_BETWEEN = 0.6;
-var MAX_LIVES = 5, LIFE_REGEN_EVERY = 8;
+
+// --- Жизни: стало заметно щедрее ---
+var START_LIVES          = 5;    // было 3
+var MAX_LIVES            = 9;    // было 5
+var LIFE_REGEN_EVERY     = 5;    // было 8 — чаще +1 жизнь за задания
+var HEART_DROP_CHANCE    = 0.06; // шанс выпадения бонусного ❤️
+var HEART_DROP_MIN_LIVES = 0;    // падает всегда, если < MAX_LIVES
+
 var BREATHER_EVERY = 5, BREATHER_DURATION = 12, BREATHER_LOOSEN = 1.5;
 var MAX_ITEMS = 30, HUD_THROTTLE_MS = 100, SOUND_THROTTLE_MS = 60;
 
 var TYPES = {
   red:{e:'🔴'}, blue:{e:'🔵'}, green:{e:'🟢'},
   cake:{e:'🍰'}, star:{e:'⭐'}, apple:{e:'🍎'},
-  bomb:{e:'💣'}, clock:{e:'⏰'}
+  bomb:{e:'💣'}, clock:{e:'⏰'}, heart:{e:'❤️'}
 };
 
 // ========== ЗАДАНИЯ ==========
@@ -105,7 +112,8 @@ function taskDifficulty(num){
     spawnInterval: Math.max(0.55, 1.1 - s * 0.06),
     fallSpeed:     120 + s * 9,
     bombChance:    Math.min(0.18, 0.05 + s * 0.012),
-    clockChance:   0.08
+    clockChance:   0.08,
+    heartChance:   HEART_DROP_CHANCE
   };
 }
 
@@ -113,7 +121,7 @@ function isBreather(n){ return n > 0 && n % BREATHER_EVERY === 0; }
 
 // ========== СОСТОЯНИЕ ==========
 var state = {
-  lives: 3, timeLeft: START_TIME, taskNum: 1, tasksDone: 0,
+  lives: START_LIVES, timeLeft: START_TIME, taskNum: 1, tasksDone: 0,
   task: [], collected: {}, combo: 0,
   running: false, starting: false,
   items: [], spawnTimer: 0, lastTime: 0, cfg: null,
@@ -279,7 +287,8 @@ var Sound = {
   win:     function(){ this.beep(784, 0.18, 'sine',   0.14, 'win'); },
   fail:    function(){ this.beep(200, 0.40, 'sawtooth', 0.14, 'fail'); },
   clock:   function(){ this.beep(1400, 0.10, 'sine',  0.14, 'clock'); },
-  regen:   function(){ this.beep(1100, 0.20, 'sine',  0.16, 'regen'); }
+  regen:   function(){ this.beep(1100, 0.20, 'sine',  0.16, 'regen'); },
+  heart:   function(){ this.beep(1200, 0.15, 'sine',  0.18, 'heart'); }
 };
 
 // ========== ЗАПУСК ==========
@@ -287,7 +296,7 @@ function startGame(){
   if(state.starting) return;
   state.starting = true;
 
-  state.lives = 3;
+  state.lives = START_LIVES;
   state.timeLeft = START_TIME;
   state.taskNum = 1;
   state.tasksDone = 0;
@@ -344,11 +353,17 @@ function spawnItem(){
   var inBreather = state.breatherTimer > 0;
   var bombChance = inBreather ? cfg.bombChance / BREATHER_LOOSEN : cfg.bombChance;
 
+  // Шанс сердца падает, только если жизней меньше максимума
+  var heartChance = (state.lives < MAX_LIVES && state.lives >= HEART_DROP_MIN_LIVES)
+                    ? cfg.heartChance : 0;
+
   var type;
   var r = Math.random();
-  if(r < bombChance){
+  if(r < heartChance){
+    type = 'heart';
+  } else if(r < heartChance + bombChance){
     type = 'bomb';
-  } else if(r < bombChance + cfg.clockChance){
+  } else if(r < heartChance + bombChance + cfg.clockChance){
     type = 'clock';
   } else {
     if(Math.random() < 0.6){
@@ -492,6 +507,20 @@ function updateLion(dt, timeScale){
 function catchItem(it){
   var inBreather = state.breatherTimer > 0;
 
+  // ❤️ Бонусная жизнь
+  if(it.type === 'heart'){
+    if(state.lives < MAX_LIVES){
+      state.lives++;
+      flash('❤️ +1 жизнь!', '#ff69b4');
+      Sound.heart();
+    } else {
+      flash('❤️ уже максимум', '#ff69b4');
+    }
+    updateHUD(true);
+    return;
+  }
+
+  // ⏰ Бонус времени
   if(it.type === 'clock'){
     state.timeLeft = Math.min(MAX_TIME, state.timeLeft + TIME_CLOCK_BONUS);
     flash('⏰ +' + TIME_CLOCK_BONUS + 'с', '#7CFC00');
@@ -500,6 +529,7 @@ function catchItem(it){
     return;
   }
 
+  // 💣 Бомба
   if(it.type === 'bomb'){
     if(!inBreather){
       state.lives--;
@@ -515,6 +545,7 @@ function catchItem(it){
     return;
   }
 
+  // Задание
   var taskItem = null;
   for(var i = 0; i < state.task.length; i++){
     if(state.task[i].type === it.type){ taskItem = state.task[i]; break; }
@@ -556,9 +587,10 @@ function completeTask(){
   Sound.win();
   showCombo();
 
+  // Регенерация жизни каждые LIFE_REGEN_EVERY заданий
   if(state.tasksDone > 0 && state.tasksDone % LIFE_REGEN_EVERY === 0 && state.lives < MAX_LIVES){
     state.lives++;
-    flash('❤️ +1 жизнь!', '#ff69b4');
+    flash('❤️ +1 жизнь! (за задания)', '#ff69b4');
     Sound.regen();
   }
 
@@ -621,6 +653,11 @@ function draw(dt){
     ctx.save();
     ctx.translate(it.x, it.y);
     ctx.rotate(Math.sin(it.rot) * 0.35);
+    // Подсветка сердца — чтобы его было видно
+    if(it.type === 'heart'){
+      ctx.shadowColor = '#ff69b4';
+      ctx.shadowBlur = 18;
+    }
     ctx.fillText(TYPES[it.type].e, 0, 0);
     ctx.restore();
   }
