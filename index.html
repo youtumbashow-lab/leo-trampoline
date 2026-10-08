@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Львёнок на батуте2</title>
+<title>Львёнок на батуте3</title>
 <style>
   html,body{
     margin:0;height:100%;background:#87CEEB;overflow:hidden;
@@ -97,7 +97,6 @@ const GRAVITY = 1600;
 const JUMP_HEIGHT = H * (2/3);
 const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 
-// --- Балансировка ---
 const START_TIME       = 60;
 const TIME_BONUS_BASE  = 12;
 const TIME_BONUS_COMBO = 2;
@@ -114,11 +113,10 @@ const BREATHER_EVERY      = 5;
 const BREATHER_DURATION   = 12;
 const BREATHER_LOOSEN     = 1.5;
 
-// --- Защита от фризов ---
-const MAX_ITEMS           = 30;   // не более предметов на экране
-const MAX_FLASHES         = 3;    // максимум вспышек одновременно
-const HUD_THROTTLE_MS     = 100;  // обновление HUD не чаще 10 раз/сек
-const SOUND_THROTTLE_MS   = 50;   // не более 20 звуков в сек
+const MAX_ITEMS           = 30;
+const MAX_FLASHES         = 3;
+const HUD_THROTTLE_MS     = 100;
+const SOUND_THROTTLE_MS   = 50;
 
 const TYPES = {
   red:    {emoji:'🔴', name:'красный шарик'},
@@ -197,7 +195,7 @@ const lion = {
   x: W/2, y: H-120, w: 70, h: 70,
   vy: 0,
   jumpPower: JUMP_POWER,
-  justBounced: false   // защита от многократного звука отскока
+  justBounced: false
 };
 
 const trampoline = { x: W/2 - 130, y: H - 60, w: 260, h: 18 };
@@ -267,7 +265,6 @@ function showCombo(){
 }
 
 function flash(text, color='#fff'){
-  // Ограничиваем количество одновременных вспышек
   const existing = wrapEl.querySelectorAll('.flash');
   if(existing.length >= MAX_FLASHES){
     existing[0].remove();
@@ -280,7 +277,7 @@ function flash(text, color='#fff'){
   setTimeout(() => { if(div.parentNode) div.remove(); }, 750);
 }
 
-// ==================== ЗВУК (с троттлингом) ====================
+// ==================== ЗВУК ====================
 const Sound = {
   ctx: null,
   lastPlay: 0,
@@ -290,14 +287,13 @@ const Sound = {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       } catch(e){ this.ctx = null; }
     }
-    // Возобновляем контекст, если он был suspended (Chrome autoplay policy)
     if(this.ctx && this.ctx.state === 'suspended'){
       this.ctx.resume().catch(()=>{});
     }
   },
   beep(freq, dur, type='sine', vol=0.15){
     const now = performance.now();
-    if(now - this.lastPlay < SOUND_THROTTLE_MS) return;   // троттлинг
+    if(now - this.lastPlay < SOUND_THROTTLE_MS) return;
     this.lastPlay = now;
 
     try{
@@ -312,7 +308,6 @@ const Sound = {
       o.connect(g); g.connect(this.ctx.destination);
       o.start();
       o.stop(this.ctx.currentTime + dur);
-      // Гарантированно освобождаем
       o.onended = () => { try { o.disconnect(); g.disconnect(); } catch(e){} };
     }catch(e){}
   },
@@ -327,7 +322,6 @@ const Sound = {
 
 // ==================== ЗАПУСК ИГРЫ ====================
 function startGame(){
-  // Отменяем предыдущий цикл, если был
   if(state.rafId) cancelAnimationFrame(state.rafId);
 
   state.lives = 3;
@@ -346,7 +340,6 @@ function startGame(){
   lion.vy = lion.jumpPower;
   lion.justBounced = false;
 
-  // Разблокируем звук после клика
   Sound.init();
 
   nextTask();
@@ -373,7 +366,6 @@ function nextTask(){
 
 // ==================== СПАВН ====================
 function spawnItem(){
-  // Не превышаем лимит предметов
   if(state.items.length >= MAX_ITEMS) return;
 
   const cfg = state.cfg;
@@ -442,7 +434,6 @@ function update(dt){
   updateHUD(false);
   updateLion(dt, timeScale);
 
-  // Спавн
   state.spawnTimer -= dt;
   if(state.spawnTimer <= 0){
     spawnItem();
@@ -451,7 +442,6 @@ function update(dt){
     state.spawnTimer = interval;
   }
 
-  // Предметы
   for(let i = state.items.length - 1; i >= 0; i--){
     const it = state.items[i];
     it.y += it.vy * dt * timeScale;
@@ -459,7 +449,8 @@ function update(dt){
 
     const dx = it.x - lion.x;
     const dy = it.y - (lion.y + lion.h/2);
-    if(dx*dx + dy*dy < (it.r + lion.w/2 - 12) ** 2){
+    const rad = it.r + lion.w/2 - 12;
+    if(dx*dx + dy*dy < rad*rad){
       catchItem(it);
       state.items.splice(i, 1);
       if(!state.running) return;
@@ -505,7 +496,6 @@ function updateLion(dt, timeScale){
       if(!lion.justBounced){ Sound.jump(); lion.justBounced = true; }
     }
   } else if(lion.vy < 0){
-    // Львёнок в воздухе — сброс флага отскока
     lion.justBounced = false;
   }
 }
@@ -529,7 +519,7 @@ function catchItem(it){
       state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
       flash(`💣 −${TIME_PENALTY}с  ❤️-1`, '#ff5555');
     } else {
-      flash(`💣 (передышка)`, '#ffaa00');
+      flash('💣 (передышка)', '#ffaa00');
     }
     Sound.wrong();
     if(state.lives <= 0){ gameOver(); return; }
@@ -552,7 +542,7 @@ function catchItem(it){
       state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
       flash(`❌ Лишний  −${TIME_PENALTY}с  ❤️-1`, '#ffaa00');
     } else {
-      flash(`❌ (передышка)`, '#ffaa00');
+      flash('❌ (передышка)', '#ffaa00');
     }
     Sound.wrong();
     if(state.lives <= 0){ gameOver(); return; }
@@ -573,7 +563,7 @@ function completeTask(){
 
   if(state.tasksDone > 0 && state.tasksDone % LIFE_REGEN_EVERY === 0 && state.lives < MAX_LIVES){
     state.lives++;
-    flash(`❤️ +1 жизнь!`, '#ff69b4');
+    flash('❤️ +1 жизнь!', '#ff69b4');
     Sound.regen();
   }
 
@@ -751,4 +741,21 @@ function showOverlay(text, hint, showReset, cb){
 // ==================== СТАРТ ====================
 overlay.onclick = () => {
   overlay.classList.add('hidden');
-  state.st
+  state.started = true;
+  startGame();
+};
+
+// Ресайз
+function fitCanvas(){
+  const wrap = document.getElementById('wrap');
+  const scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H);
+  canvas.style.width  = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+addEventListener('resize', fitCanvas);
+fitCanvas();
+
+})();
+</script>
+</body>
+</html>
