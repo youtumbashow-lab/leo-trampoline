@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Львёнок на батуте</title>
+<style>
+  html,body{margin:0;height:100%;background:#87CEEB;overflow:hidden;font-family:'Comic Sans MS',sans-serif;}
+  canvas{display:block;margin:0 auto;background:linear-gradient(#87CEEB,#FFE4B5);}
+  #hud{position:absolute;top:0;left:0;right:0;padding:10px;color:#fff;text-shadow:2px 2px 0 #000;font-size:20px;pointer-events:none;}
+  #task{font-size:24px;}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+           background:rgba(0,0,0,.6);color:#fff;font-size:32px;text-align:center;flex-direction:column;cursor:pointer;}
+  #overlay.hidden{display:none;}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>❤️ <span id="lives">3</span> | ⏱ <span id="time">20</span>с | Уровень <span id="level">1</span></div>
+  <div id="task">Задание: —</div>
+</div>
+<canvas id="c" width="800" height="600"></canvas>
+<div id="overlay" class="hidden"><div id="msg"></div><div style="font-size:18px;margin-top:20px">Нажми, чтобы продолжить</div></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ---------- Типы предметов ----------
+const TYPES = {
+  red:    {emoji:'🔴', color:'#e74c3c', name:'красный шарик'},
+  blue:   {emoji:'🔵', color:'#3498db', name:'синий шарик'},
+  green:  {emoji:'🟢', color:'#2ecc71', name:'зелёный шарик'},
+  cake:   {emoji:'🍰', color:'#f39c12', name:'тортик'},
+  star:   {emoji:'⭐', color:'#f1c40f', name:'звезда'},
+  apple:  {emoji:'🍎', color:'#c0392b', name:'яблоко'},
+  bomb:   {emoji:'💣', color:'#000',    name:'бомба'}
+};
+
+// ---------- Уровни (усложняются) ----------
+function makeLevel(n){
+  const tasks = [
+    [{type:'red', n:3}],
+    [{type:'red', n:2},{type:'cake', n:1}],
+    [{type:'star', n:3}],
+    [{type:'blue', n:2},{type:'apple', n:1}],
+    [{type:'red', n:2},{type:'blue', n:2},{type:'star', n:1}],
+    [{type:'cake', n:2},{type:'star', n:2},{type:'apple', n:2}]
+  ];
+  const t = tasks[(n-1) % tasks.length];
+  return {
+    task: t,
+    time: Math.max(10, 25 - n*1.5),
+    spawnInterval: Math.max(0.35, 1.1 - n*0.07),
+    fallSpeed: 120 + n*18,
+    bombChance: Math.min(0.35, 0.1 + n*0.03)
+  };
+}
+
+// ---------- Состояние ----------
+let state = {
+  level:1, lives:3, timeLeft:20,
+  task:[], collected:{},
+  running:false, paused:false,
+  items:[], spawnTimer:0, lastTime:0
+};
+
+// ---------- Львёнок ----------
+const lion = {
+  x: W/2, y: H-120, w:70, h:70,
+  vy:0, vx:0,
+  onTrampoline:false,
+  jumpPower:-550
+};
+const keys = {};
+addEventListener('keydown', e=>keys[e.key]=true);
+addEventListener('keyup',   e=>keys[e.key]=false);
+// Тач/мышь
+let pointerX = null;
+canvas.addEventListener('mousemove', e=>{pointerX = e.offsetX;});
+canvas.addEventListener('touchmove', e=>{pointerX = e.touches[0].clientX - canvas.getBoundingClientRect().left;}, {passive:true});
+
+// ---------- Батут ----------
+const trampoline = {x: W/2-120, y: H-60, w:240, h:20};
+
+// ---------- Запуск уровня ----------
+function startLevel(){
+  const cfg = makeLevel(state.level);
+  state.task = cfg.task;
+  state.collected = {};
+  cfg.task.forEach(t=>state.collected[t.type]=0);
+  state.timeLeft = cfg.time;
+  state.items = [];
+  state.spawnTimer = 0;
+  state.cfg = cfg;
+  lion.x = W/2;
+  lion.y = trampoline.y - lion.h;
+  lion.vy = lion.jumpPower;
+  updateHUD();
+  state.running = true;
+  state.lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function updateHUD(){
+  document.getElementById('lives').textContent = state.lives;
+  document.getElementById('time').textContent = Math.ceil(state.timeLeft);
+  document.getElementById('level').textContent = state.level;
+  const parts = state.task.map(t=>{
+    const got = state.collected[t.type]||0;
+    return `${got}/${t.n} ${TYPES[t.type].emoji}`;
+  });
+  document.getElementById('task').textContent = 'Задание: ' + parts.join('  ');
+}
+
+// ---------- Спавн ----------
+function spawnItem(){
+  const cfg = state.cfg;
+  let type;
+  if(Math.random() < cfg.bombChance){
+    type = 'bomb';
+  } else {
+    // 60% нужный, 40% случайный другой
+    if(Math.random() < 0.6){
+      const need = state.task.filter(t => (state.collected[t.type]||0) < t.n);
+      if(need.length) type = need[Math.floor(Math.random()*need.length)].type;
+      else type = Object.keys(TYPES)[Math.floor(Math.random()*(Object.keys(TYPES).length-1))];
+    } else {
+      const pool = Object.keys(TYPES).filter(k=>k!=='bomb');
+      type = pool[Math.floor(Math.random()*pool.length)];
+    }
+  }
+  state.items.push({
+    x: 60 + Math.random()*(W-120),
+    y: -40,
+    r: 22,
+    type,
+    vy: cfg.fallSpeed * (0.85 + Math.random()*0.3),
+    rot: 0
+  });
+}
+
+// ---------- Обновление ----------
+function update(dt){
+  state.timeLeft -= dt;
+  if(state.timeLeft <= 0){ fail('⏰ Время вышло!'); return; }
+
+  // Движение львёнка
+  const speed = 380;
+  let ax = 0;
+  if(keys['ArrowLeft']||keys['a']||keys['A']) ax -= 1;
+  if(keys['ArrowRight']||keys['d']||keys['D']) ax += 1;
+  if(pointerX!==null){
+    const diff = pointerX - lion.x;
+    if(Math.abs(diff)>5) ax = Math.sign(diff);
+  }
+  lion.x += ax*speed*dt;
+  lion.x = Math.max(lion.w/2, Math.min(W-lion.w/2, lion.x));
+
+  // Физика прыжка
+  lion.vy += 1600*dt;
+  lion.y += lion.vy*dt;
+  if(lion.y + lion.h >= trampoline.y && lion.vy>0){
+    if(lion.x + lion.w/2 > trampoline.x && lion.x - lion.w/2 < trampoline.x+trampoline.w){
+      lion.y = trampoline.y - lion.h;
+      lion.vy = lion.jumpPower;
+    } else {
+      // упал мимо — не критично, отскок от земли
+      lion.y = H - lion.h - 10;
+      lion.vy = lion.jumpPower*0.7;
+    }
+  }
+
+  // Спавн
+  state.spawnTimer -= dt;
+  if(state.spawnTimer <= 0){
+    spawnItem();
+    state.spawnTimer = state.cfg.spawnInterval;
+  }
+
+  // Предметы
+  for(let i=state.items.length-1;i>=0;i--){
+    const it = state.items[i];
+    it.y += it.vy*dt;
+    it.rot += dt*2;
+
+    // Ловля
+    const dx = it.x - lion.x;
+    const dy = it.y - (lion.y + lion.h/2);
+    if(Math.hypot(dx,dy) < it.r + lion.w/2 - 10){
+      catchItem(it);
+      state.items.splice(i,1);
+      continue;
+    }
+    if(it.y > H+50) state.items.splice(i,1);
+  }
+}
+
+function catchItem(it){
+  if(it.type === 'bomb'){
+    state.lives--;
+    flash('💣 Бомба!');
+    if(state.lives<=0){ fail('💀 Жизни кончились!'); return; }
+    updateHUD();
+    return;
+  }
+  const taskItem = state.task.find(t=>t.type===it.type);
+  if(taskItem && state.collected[it.type] < taskItem.n){
+    state.collected[it.type]++;
+    updateHUD();
+    if(state.task.every(t => state.collected[t.type] >= t.n)){
+      win();
+    }
+  } else {
+    // лишний предмет
+    state.lives--;
+    flash('❌ Лишний предмет!');
+    if(state.lives<=0){ fail('💀 Жизни кончились!'); return; }
+    updateHUD();
+  }
+}
+
+// ---------- Отрисовка ----------
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // облака
+  ctx.fillStyle='rgba(255,255,255,.7)';
+  for(let i=0;i<5;i++){
+    const x = ((i*200 + performance.now()*0.02) % (W+200)) - 100;
+    ctx.beginPath(); ctx.arc(x, 80+i*30, 30, 0, Math.PI*2); ctx.fill();
+  }
+
+  // батут
+  ctx.fillStyle='#c0392b';
+  ctx.beginPath();
+  ctx.roundRect(trampoline.x, trampoline.y, trampoline.w, trampoline.h, 10);
+  ctx.fill();
+  ctx.fillStyle='#7f1d1d';
+  ctx.fillRect(trampoline.x+10, trampoline.y+trampoline.h, 10, 40);
+  ctx.fillRect(trampoline.x+trampoline.w-20, trampoline.y+trampoline.h, 10, 40);
+
+  // предметы
+  ctx.font='40px serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(const it of state.items){
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.rotate(Math.sin(it.rot)*0.3);
+    ctx.fillText(TYPES[it.type].emoji, 0, 0);
+    ctx.restore();
+  }
+
+  // львёнок
+  ctx.font='70px serif';
+  ctx.fillText('🦁', lion.x, lion.y + lion.h/2);
+
+  // таймер-полоска
+  const p = Math.max(0, state.timeLeft / state.cfg.time);
+  ctx.fillStyle='#000'; ctx.fillRect(0, H-10, W, 10);
+  ctx.fillStyle = p>0.5?'#2ecc71':p>0.25?'#f39c12':'#e74c3c';
+  ctx.fillRect(0, H-10, W*p, 10);
+}
+
+// ---------- Цикл ----------
+function loop(t){
+  if(!state.running) return;
+  const dt = Math.min(0.05, (t - state.lastTime)/1000);
+  state.lastTime = t;
+  update(dt);
+  if(state.running) draw();
+  if(state.running) requestAnimationFrame(loop);
+}
+
+// ---------- Победа / провал ----------
+function win(){
+  state.running = false;
+  showOverlay(`🏆 Уровень ${state.level} пройден!`, ()=>{
+    state.level++;
+    startLevel();
+  });
+}
+function fail(reason){
+  state.running = false;
+  state.lives = 3;
+  state.level = 1;
+  showOverlay(`${reason}\nПопробуем сначала!`, ()=>{
+    startLevel();
+  });
+}
+
+function showOverlay(text, cb){
+  const o = document.getElementById('overlay');
+  document.getElementById('msg').textContent = text;
+  o.classList.remove('hidden');
+  o.onclick = ()=>{ o.classList.add('hidden'); cb(); };
+}
+
+function flash(txt){
+  const o = document.getElementById('overlay');
+  // быстрый флеш без паузы
+  const div = document.createElement('div');
+  div.textContent = txt;
+  div.style.cssText='position:absolute;top:100px;left:50%;transform:translateX(-50%);font-size:36px;color:#fff;text-shadow:2px 2px 0 #000;pointer-events:none;';
+  document.body.appendChild(div);
+  setTimeout(()=>div.remove(), 600);
+}
+
+// Старт
+document.getElementById('overlay').classList.remove('hidden');
+document.getElementById('msg').textContent = '🦁 Львёнок на батуте!\nЛови нужные предметы, избегай лишних и бомб!';
+document.getElementById('overlay').onclick = ()=>{
+  document.getElementById('overlay').classList.add('hidden');
+  startLevel();
+};
+</script>
+</body>
+</html>
