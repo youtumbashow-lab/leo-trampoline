@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Львёнок на батуте5</title>
+<title>Львёнок на батуте222</title>
 <style>
   html,body{margin:0;height:100%;background:#87CEEB;overflow:hidden;
     font-family:'Comic Sans MS','Segoe UI',sans-serif;
@@ -200,35 +200,47 @@ function showCombo(){
   showCombo._t = setTimeout(function(){ comboEl.classList.remove('show'); }, 1200);
 }
 
-// ========== ВСПЫШКИ (на canvas, без DOM) ==========
+// ========== ВСПЫШКИ ==========
 function flash(text, color){
-  state.flashes.push({ text: text, color: color || '#fff', life: 0.75, t: 0.75 });
-  if(state.flashes.length > 5) state.flashes.shift();
+  for(var i = 0; i < state.flashes.length; i++){
+    if(state.flashes[i].text === text){
+      state.flashes[i].t = state.flashes[i].life;
+      state.flashes[i].color = color || '#fff';
+      return;
+    }
+  }
+  state.flashes.push({ text: text, color: color || '#fff', life: 0.9, t: 0.9 });
+  while(state.flashes.length > 3) state.flashes.shift();
 }
 
 function drawFlashes(dt){
-  for(var i = state.flashes.length - 1; i >= 0; i--){
+  for(var i = 0; i < state.flashes.length; i++){
     var f = state.flashes[i];
     f.t -= dt;
-    if(f.t <= 0){ state.flashes.splice(i, 1); continue; }
+    if(f.t <= 0) continue;
+
     var progress = 1 - f.t / f.life;
-    var y = 120 - progress * 40;
-    var alpha = f.t > 0.3 ? 1 : f.t / 0.3;
-    var scale = progress < 0.2 ? 0.6 + progress * 2 : 1.1 - (progress - 0.2) * 0.15;
+    var baseY = 110 + i * 52;
+    var y = baseY - progress * 25;
+    var alpha = f.t > 0.35 ? 1 : f.t / 0.35;
+    var scale = progress < 0.2 ? 0.7 + progress * 1.5 : 1.0 - (progress - 0.2) * 0.1;
 
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(W/2, y);
     ctx.scale(scale, scale);
-    ctx.font = 'bold 38px "Comic Sans MS", sans-serif';
+    ctx.font = 'bold 34px "Comic Sans MS", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 5;
     ctx.strokeStyle = '#000';
     ctx.strokeText(f.text, 0, 0);
     ctx.fillStyle = f.color;
     ctx.fillText(f.text, 0, 0);
     ctx.restore();
+  }
+  for(var j = state.flashes.length - 1; j >= 0; j--){
+    if(state.flashes[j].t <= 0) state.flashes.splice(j, 1);
   }
 }
 
@@ -411,11 +423,9 @@ function update(dt){
     state.spawnTimer = interval;
   }
 
-  // Итерируем по копии, чтобы безопасно удалять из оригинала
   var snapshot = state.items.slice();
   for(var i = 0; i < snapshot.length; i++){
     var it = snapshot[i];
-    // Может быть удалён предыдущим catchItem
     if(state.items.indexOf(it) < 0) continue;
 
     it.y += it.vy * dt * timeScale;
@@ -736,7 +746,6 @@ overlay.onclick = function(){
   startGame();
 };
 
-// Ресайз
 function fitCanvas(){
   var wrap = document.getElementById('wrap');
   var scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H);
