@@ -32,30 +32,39 @@
     font-size:22px;font-weight:bold;text-align:right;line-height:1.4;
     flex:1;
   }
+  #combo{
+    position:absolute;top:150px;left:50%;transform:translateX(-50%);
+    font-size:26px;font-weight:bold;color:#ffeb3b;
+    text-shadow:2px 2px 0 #000;pointer-events:none;z-index:6;
+    opacity:0;transition:opacity .2s;
+  }
+  #combo.show{opacity:1;}
   #overlay{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.7);color:#fff;font-size:30px;text-align:center;
+    background:rgba(0,0,0,.75);color:#fff;font-size:28px;text-align:center;
     flex-direction:column;cursor:pointer;z-index:10;padding:20px;
   }
   #overlay.hidden{display:none;}
   #msg{max-width:90%;line-height:1.4;white-space:pre-line;text-shadow:2px 2px 0 #000;}
   #hint{font-size:16px;margin-top:24px;opacity:.85;}
-  #resetBtn{
-    margin-top:20px;padding:10px 24px;font-size:16px;
-    background:#e74c3c;color:#fff;border:2px solid #fff;border-radius:8px;
-    cursor:pointer;font-family:inherit;display:none;
+  .btn{
+    margin-top:16px;padding:10px 24px;font-size:16px;
+    background:#3498db;color:#fff;border:2px solid #fff;border-radius:8px;
+    cursor:pointer;font-family:inherit;
   }
-  #resetBtn:hover{background:#c0392b;}
+  .btn:hover{background:#2980b9;}
+  .btn.red{background:#e74c3c;}
+  .btn.red:hover{background:#c0392b;}
   .flash{
     position:absolute;top:120px;left:50%;transform:translateX(-50%);
     font-size:38px;color:#fff;text-shadow:3px 3px 0 #000;
     pointer-events:none;z-index:8;font-weight:bold;
-    animation:pop 0.6s ease-out forwards;
+    animation:pop 0.7s ease-out forwards;
   }
   @keyframes pop{
     0%{opacity:0;transform:translateX(-50%) scale(.6);}
-    20%{opacity:1;transform:translateX(-50%) scale(1.1);}
-    100%{opacity:0;transform:translateX(-50%) scale(1) translateY(-40px);}
+    20%{opacity:1;transform:translateX(-50%) scale(1.15);}
+    100%{opacity:0;transform:translateX(-50%) scale(1) translateY(-50px);}
   }
 </style>
 </head>
@@ -63,13 +72,14 @@
 <div id="wrap">
   <canvas id="c" width="800" height="600"></canvas>
   <div id="hud">
-    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">20</span>с<br>Ур. <span id="level">1</span></div>
+    <div id="hudLeft">❤️ <span id="lives">3</span><br>⏱ <span id="time">40</span>с<br>Задание <span id="taskNum">1</span></div>
     <div id="task">Задание: —</div>
   </div>
+  <div id="combo"></div>
   <div id="overlay">
     <div id="msg">🦁 Львёнок на батуте!</div>
     <div id="hint">Нажми, чтобы начать</div>
-    <button id="resetBtn">Начать заново</button>
+    <button class="btn red" id="resetBtn" style="display:none">Сбросить рекорд</button>
   </div>
 </div>
 
@@ -87,6 +97,12 @@ const GRAVITY = 1600;
 const JUMP_HEIGHT = H * (2/3);
 const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 
+const START_TIME = 40;       // стартовый запас времени
+const TIME_BONUS_BASE = 6;   // базовая награда за задание
+const TIME_PENALTY = 2;      // штраф за ошибку
+const TIME_CLOCK_BONUS = 3;  // бонус от ⏰
+const MAX_TIME = 99;
+
 const TYPES = {
   red:    {emoji:'🔴', name:'красный шарик'},
   blue:   {emoji:'🔵', name:'синий шарик'},
@@ -94,13 +110,15 @@ const TYPES = {
   cake:   {emoji:'🍰', name:'тортик'},
   star:   {emoji:'⭐', name:'звезда'},
   apple:  {emoji:'🍎', name:'яблоко'},
-  bomb:   {emoji:'💣', name:'бомба'}
+  bomb:   {emoji:'💣', name:'бомба'},
+  clock:  {emoji:'⏰', name:'часы'}
 };
 
-// ==================== УРОВНИ ====================
-function makeLevel(n){
-  const isBoss = (n % 10 === 0);
-  const tasks = [
+// ==================== ЗАДАНИЯ (по индексу прогресса) ====================
+// Возвращает задание исходя из номера текущего задания (1,2,3...)
+function makeTask(num){
+  // Пул шаблонов — циклический, но с ростом количества
+  const templates = [
     [{type:'red', n:3}],
     [{type:'red', n:2},{type:'cake', n:1}],
     [{type:'star', n:3}],
@@ -110,38 +128,43 @@ function makeLevel(n){
     [{type:'green', n:3},{type:'cake', n:1}],
     [{type:'red', n:3},{type:'blue', n:2},{type:'apple', n:1}],
     [{type:'star', n:4},{type:'cake', n:2}],
-    [{type:'star', n:5},{type:'cake', n:3},{type:'red', n:3}]
+    [{type:'green', n:2},{type:'red', n:2},{type:'blue', n:2},{type:'star', n:1}]
   ];
-  const t = tasks[(n-1) % tasks.length];
+  const cycle = Math.floor((num - 1) / templates.length);
+  const tmpl = templates[(num - 1) % templates.length];
+  // Каждый цикл +1 к количеству одного из типов
+  return tmpl.map((t, i) => ({
+    type: t.type,
+    n: t.n + (cycle > 0 && i === 0 ? cycle : 0)
+  }));
+}
 
-  const baseTime   = isBoss ? 35 : 22;
-  const baseSpawn  = isBoss ? 0.7 : 1.0;
-  const baseSpeed  = 130;
-  const cycle = Math.floor((n-1)/tasks.length);
-
+// Настройки сложности от номера задания
+function taskDifficulty(num){
   return {
-    task: t,
-    time: Math.max(12, baseTime - cycle*1.5),
-    spawnInterval: Math.max(0.35, baseSpawn - cycle*0.06 - (isBoss?0:0.01*n)),
-    fallSpeed: baseSpeed + n*14,
-    bombChance: Math.min(0.4, (isBoss?0.3:0.12) + cycle*0.03),
-    isBoss
+    spawnInterval: Math.max(0.3, 1.0 - num * 0.03),
+    fallSpeed: 130 + num * 10,
+    bombChance: Math.min(0.35, 0.1 + num * 0.02),
+    clockChance: 0.05
   };
 }
 
 // ==================== СОСТОЯНИЕ ====================
 const state = {
-  level: 1,
   lives: 3,
-  timeLeft: 20,
+  timeLeft: START_TIME,
+  taskNum: 1,
   task: [],
   collected: {},
+  combo: 0,          // подряд выполненных заданий без ошибок
   running: false,
   items: [],
   spawnTimer: 0,
   lastTime: 0,
   cfg: null,
-  started: false
+  started: false,
+  bestTasks: Number(localStorage.getItem('lion_bestTasks') || 0),
+  bestTime: Number(localStorage.getItem('lion_bestTime') || 0)
 };
 
 // ==================== ЛЬВЁНОК ====================
@@ -179,8 +202,9 @@ canvas.addEventListener('touchend',   () => { pointerX = null; });
 // ==================== HUD ====================
 const hudLives = document.getElementById('lives');
 const hudTime  = document.getElementById('time');
-const hudLevel = document.getElementById('level');
+const hudTaskNum = document.getElementById('taskNum');
 const hudTask  = document.getElementById('task');
+const comboEl  = document.getElementById('combo');
 const overlay  = document.getElementById('overlay');
 const msgEl    = document.getElementById('msg');
 const hintEl   = document.getElementById('hint');
@@ -189,7 +213,7 @@ const resetBtn = document.getElementById('resetBtn');
 function updateHUD(){
   hudLives.textContent = state.lives;
   hudTime.textContent  = Math.max(0, Math.ceil(state.timeLeft));
-  hudLevel.textContent = state.level + (state.cfg?.isBoss ? ' 👹' : '');
+  hudTaskNum.textContent = state.taskNum;
   const parts = state.task.map(t => {
     const got = state.collected[t.type] || 0;
     const done = got >= t.n;
@@ -198,13 +222,21 @@ function updateHUD(){
   hudTask.textContent = 'Задание: ' + parts.join('  ');
 }
 
+function showCombo(){
+  if(state.combo < 2){ comboEl.classList.remove('show'); return; }
+  comboEl.textContent = `🔥 Комбо ×${state.combo}`;
+  comboEl.classList.add('show');
+  clearTimeout(showCombo._t);
+  showCombo._t = setTimeout(()=>comboEl.classList.remove('show'), 1200);
+}
+
 function flash(text, color='#fff'){
   const div = document.createElement('div');
   div.className = 'flash';
   div.textContent = text;
   div.style.color = color;
   document.getElementById('wrap').appendChild(div);
-  setTimeout(() => div.remove(), 650);
+  setTimeout(() => div.remove(), 750);
 }
 
 // ==================== ЗВУК ====================
@@ -227,17 +259,16 @@ const Sound = {
   collect(){ this.beep(880, 0.12, 'sine', 0.15); setTimeout(()=>this.beep(1320,0.1), 70); },
   wrong(){ this.beep(180, 0.25, 'sawtooth', 0.15); },
   win(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>this.beep(f,0.15,'sine',0.15), i*100)); },
-  fail(){ [400,300,200].forEach((f,i)=>setTimeout(()=>this.beep(f,0.25,'sawtooth',0.15), i*150)); }
+  fail(){ [400,300,200].forEach((f,i)=>setTimeout(()=>this.beep(f,0.25,'sawtooth',0.15), i*150)); },
+  clock(){ this.beep(1200,0.08,'sine',0.15); setTimeout(()=>this.beep(1600,0.08),70); }
 };
 
-// ==================== ЗАПУСК УРОВНЯ ====================
-function startLevel(){
-  const cfg = makeLevel(state.level);
-  state.cfg = cfg;
-  state.task = cfg.task;
-  state.collected = {};
-  cfg.task.forEach(t => state.collected[t.type] = 0);
-  state.timeLeft = cfg.time;
+// ==================== ЗАПУСК ИГРЫ ====================
+function startGame(){
+  state.lives = 3;
+  state.timeLeft = START_TIME;
+  state.taskNum = 1;
+  state.combo = 0;
   state.items = [];
   state.spawnTimer = 0.3;
 
@@ -245,10 +276,19 @@ function startLevel(){
   lion.y = trampoline.y - lion.h;
   lion.vy = lion.jumpPower;
 
-  updateHUD();
+  nextTask();
   state.running = true;
   state.lastTime = performance.now();
   requestAnimationFrame(loop);
+}
+
+// ==================== СЛЕДУЮЩЕЕ ЗАДАНИЕ ====================
+function nextTask(){
+  state.task = makeTask(state.taskNum);
+  state.collected = {};
+  state.task.forEach(t => state.collected[t.type] = 0);
+  state.cfg = taskDifficulty(state.taskNum);
+  updateHUD();
 }
 
 // ==================== СПАВН ====================
@@ -256,19 +296,22 @@ function spawnItem(){
   const cfg = state.cfg;
   let type;
 
-  if(Math.random() < cfg.bombChance){
+  const r = Math.random();
+  if(r < cfg.bombChance){
     type = 'bomb';
+  } else if(r < cfg.bombChance + cfg.clockChance){
+    type = 'clock';
   } else {
     if(Math.random() < 0.6){
       const need = state.task.filter(t => (state.collected[t.type] || 0) < t.n);
       if(need.length){
         type = need[Math.floor(Math.random() * need.length)].type;
       } else {
-        const pool = Object.keys(TYPES).filter(k => k !== 'bomb');
+        const pool = Object.keys(TYPES).filter(k => !['bomb','clock'].includes(k));
         type = pool[Math.floor(Math.random() * pool.length)];
       }
     } else {
-      const pool = Object.keys(TYPES).filter(k => k !== 'bomb');
+      const pool = Object.keys(TYPES).filter(k => !['bomb','clock'].includes(k));
       type = pool[Math.floor(Math.random() * pool.length)];
     }
   }
@@ -285,12 +328,18 @@ function spawnItem(){
 
 // ==================== ОБНОВЛЕНИЕ ====================
 function update(dt){
-  state.timeLeft -= dt;
+  // Замедление времени при 1 жизни — шанс отыграться
+  const timeScale = state.lives === 1 ? 0.6 : 1.0;
+  state.timeLeft -= dt * timeScale;
   if(state.timeLeft <= 0){
-    fail('⏰ Время вышло!');
+    state.timeLeft = 0;
+    updateHUD();
+    gameOver();
     return;
   }
+  updateHUD();
 
+  // Движение
   const speed = 420;
   let ax = 0;
   if(keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
@@ -309,8 +358,9 @@ function update(dt){
   lion.x += ax * speed * dt;
   lion.x = Math.max(lion.w/2, Math.min(W - lion.w/2, lion.x));
 
-  lion.vy += GRAVITY * dt;
-  lion.y += lion.vy * dt;
+  // Физика
+  lion.vy += GRAVITY * dt * timeScale;
+  lion.y += lion.vy * dt * timeScale;
 
   const lionBottom = lion.y + lion.h;
   if(lionBottom >= trampoline.y && lion.vy > 0){
@@ -327,15 +377,17 @@ function update(dt){
     }
   }
 
+  // Спавн
   state.spawnTimer -= dt;
   if(state.spawnTimer <= 0){
     spawnItem();
     state.spawnTimer = state.cfg.spawnInterval;
   }
 
+  // Предметы
   for(let i = state.items.length - 1; i >= 0; i--){
     const it = state.items[i];
-    it.y += it.vy * dt;
+    it.y += it.vy * dt * timeScale;
     it.rot += dt * 2.5;
 
     const dx = it.x - lion.x;
@@ -352,11 +404,23 @@ function update(dt){
 
 // ==================== ЛОВЛЯ ====================
 function catchItem(it){
+  // Бонус времени
+  if(it.type === 'clock'){
+    state.timeLeft = Math.min(MAX_TIME, state.timeLeft + TIME_CLOCK_BONUS);
+    flash(`⏰ +${TIME_CLOCK_BONUS}с`, '#7CFC00');
+    Sound.clock();
+    updateHUD();
+    return;
+  }
+
+  // Бомба — штраф
   if(it.type === 'bomb'){
     state.lives--;
-    flash('💣 Бомба!', '#ff5555');
+    state.combo = 0;
+    state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
+    flash(`💣 −${TIME_PENALTY}с  ❤️-1`, '#ff5555');
     Sound.wrong();
-    if(state.lives <= 0){ fail('💀 Жизни кончились!'); return; }
+    if(state.lives <= 0){ gameOver(); return; }
     updateHUD();
     return;
   }
@@ -367,15 +431,41 @@ function catchItem(it){
     Sound.collect();
     updateHUD();
     if(state.task.every(t => state.collected[t.type] >= t.n)){
-      win();
+      completeTask();
     }
   } else {
+    // Лишний
     state.lives--;
-    flash('❌ Лишний!', '#ffaa00');
+    state.combo = 0;
+    state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
+    flash(`❌ Лишний  −${TIME_PENALTY}с  ❤️-1`, '#ffaa00');
     Sound.wrong();
-    if(state.lives <= 0){ fail('💀 Жизни кончились!'); return; }
+    if(state.lives <= 0){ gameOver(); return; }
     updateHUD();
   }
+}
+
+// ==================== ЗАДАНИЕ ВЫПОЛНЕНО ====================
+function completeTask(){
+  state.combo++;
+  const bonus = TIME_BONUS_BASE + state.combo;   // чем длиннее серия, тем больше времени
+  state.timeLeft = Math.min(MAX_TIME, state.timeLeft + bonus);
+  flash(`✅ +${bonus}с  (комбо ×${state.combo})`, '#7CFC00');
+  Sound.win();
+  showCombo();
+
+  // Сохраняем рекорды
+  if(state.taskNum > state.bestTasks){
+    state.bestTasks = state.taskNum;
+    localStorage.setItem('lion_bestTasks', state.bestTasks);
+  }
+  if(state.timeLeft > state.bestTime){
+    state.bestTime = Math.floor(state.timeLeft);
+    localStorage.setItem('lion_bestTime', state.bestTime);
+  }
+
+  state.taskNum++;
+  nextTask();
 }
 
 // ==================== ОТРИСОВКА ====================
@@ -403,18 +493,18 @@ function draw(){
   ctx.arc(W - 90, 90, 45, 0, Math.PI*2);
   ctx.fill();
 
+  // Батут
   ctx.fillStyle = '#c0392b';
   roundRect(trampoline.x, trampoline.y, trampoline.w, trampoline.h, 9);
   ctx.fill();
-
   ctx.fillStyle = '#7f1d1d';
   ctx.fillRect(trampoline.x + 12, trampoline.y + trampoline.h, 10, 40);
   ctx.fillRect(trampoline.x + trampoline.w - 22, trampoline.y + trampoline.h, 10, 40);
-
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   roundRect(trampoline.x + 8, trampoline.y + 3, trampoline.w - 16, 5, 3);
   ctx.fill();
 
+  // Предметы
   ctx.font = '40px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -426,12 +516,14 @@ function draw(){
     ctx.restore();
   }
 
+  // Тень львёнка
   const shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
   ctx.ellipse(lion.x, trampoline.y + 2, 35 * shadowScale, 8 * shadowScale, 0, 0, Math.PI*2);
   ctx.fill();
 
+  // Львёнок
   ctx.font = '70px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -440,10 +532,13 @@ function draw(){
   ctx.fillText('🦁', 0, 0);
   ctx.restore();
 
-  const p = Math.max(0, state.timeLeft / state.cfg.time);
+  // Таймер-полоска
+  const p = Math.max(0, Math.min(1, state.timeLeft / MAX_TIME));
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, H - 10, W, 10);
-  ctx.fillStyle = p > 0.5 ? '#2ecc71' : p > 0.25 ? '#f39c12' : '#e74c3c';
+  const color = state.timeLeft < 5 ? '#e74c3c' :
+                state.timeLeft < 12 ? '#f39c12' : '#2ecc71';
+  ctx.fillStyle = color;
   ctx.fillRect(0, H - 10, W * p, 10);
 }
 
@@ -469,43 +564,22 @@ function loop(t){
   }
 }
 
-// ==================== ПОБЕДА / ПРОВАЛ ====================
-function win(){
-  state.running = false;
-  Sound.win();
-
-  const record = Number(localStorage.getItem('lion_record') || 0);
-  if(state.level > record) localStorage.setItem('lion_record', state.level);
-  localStorage.setItem('lion_progress', state.level + 1);
-
-  const nextLevel = state.level + 1;
-  const nextIsBoss = (nextLevel % 10 === 0);
-  const bossMsg = nextIsBoss ? '\n\n👹 ВПЕРЕДИ БОСС-УРОВЕНЬ!' : '';
-
-  showOverlay(
-    `🏆 Уровень ${state.level} пройден!${bossMsg}\n\nРекорд: ${Math.max(record, state.level)}`,
-    'Нажми, чтобы продолжить',
-    false,
-    () => {
-      state.level++;
-      startLevel();
-    }
-  );
-}
-
-function fail(reason){
+// ==================== ИГРА ОКОНЧЕНА ====================
+function gameOver(){
   state.running = false;
   Sound.fail();
 
-  showOverlay(
-    `${reason}\n\nПовторяем уровень ${state.level}\nРекорд: ${localStorage.getItem('lion_record') || 1}`,
-    'Нажми, чтобы повторить уровень',
-    true,
-    () => {
-      state.lives = 3;
-      startLevel();
-    }
-  );
+  const recordMsg =
+    `🏆 Лучший результат:\n` +
+    `Заданий подряд: ${state.bestTasks}\n` +
+    `Макс. время: ${state.bestTime}с\n\n` +
+    `В этот раз:\n` +
+    `Заданий: ${state.taskNum - 1}\n` +
+    `Время: ${Math.floor(state.timeLeft)}с`;
+
+  showOverlay(recordMsg, 'Нажми, чтобы играть заново', true, () => {
+    startGame();
+  });
 }
 
 function showOverlay(text, hint, showReset, cb){
@@ -520,24 +594,19 @@ function showOverlay(text, hint, showReset, cb){
   };
   resetBtn.onclick = (e) => {
     e.stopPropagation();
-    localStorage.removeItem('lion_progress');
-    localStorage.removeItem('lion_record');
-    state.level = 1;
-    state.lives = 3;
-    overlay.classList.add('hidden');
-    startLevel();
+    localStorage.removeItem('lion_bestTasks');
+    localStorage.removeItem('lion_bestTime');
+    state.bestTasks = 0;
+    state.bestTime = 0;
+    flash('Рекорды сброшены', '#fff');
   };
 }
 
 // ==================== СТАРТ ====================
 overlay.onclick = () => {
   overlay.classList.add('hidden');
-  if(!state.started){
-    const saved = Number(localStorage.getItem('lion_progress') || 1);
-    state.level = saved;
-    state.started = true;
-  }
-  startLevel();
+  state.started = true;
+  startGame();
 };
 
 // Ресайз
