@@ -3,58 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Львёнок на батуте</title>
+<title>Львёнок на батуте5</title>
 <style>
-  html,body{
-    margin:0;height:100%;background:#87CEEB;overflow:hidden;
+  html,body{margin:0;height:100%;background:#87CEEB;overflow:hidden;
     font-family:'Comic Sans MS','Segoe UI',sans-serif;
-    -webkit-tap-highlight-color:transparent;
-    user-select:none;
-  }
-  #wrap{
-    position:relative;width:100vw;height:100vh;
-    display:flex;align-items:center;justify-content:center;
-    background:#87CEEB;
-  }
-  canvas{
-    display:block;background:linear-gradient(#87CEEB 0%,#FFE4B5 100%);
-    max-width:100%;max-height:100%;
-    touch-action:none;
-  }
-  #hud{
-    position:absolute;top:0;left:0;right:0;padding:8px 14px;
+    -webkit-tap-highlight-color:transparent;user-select:none;}
+  #wrap{position:relative;width:100vw;height:100vh;
+    display:flex;align-items:center;justify-content:center;background:#87CEEB;}
+  canvas{display:block;max-width:100%;max-height:100%;touch-action:none;}
+  #hud{position:absolute;top:0;left:0;right:0;padding:8px 14px;
     color:#fff;text-shadow:2px 2px 0 #000,0 0 8px #000;
     font-size:20px;pointer-events:none;z-index:5;
-    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
-  }
+    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
   #hudLeft{font-size:18px;line-height:1.4;}
-  #task{
-    font-size:22px;font-weight:bold;text-align:right;line-height:1.4;
-    flex:1;
-  }
-  #combo{
-    position:absolute;top:150px;left:50%;transform:translateX(-50%);
+  #task{font-size:22px;font-weight:bold;text-align:right;line-height:1.4;flex:1;}
+  #combo{position:absolute;top:150px;left:50%;transform:translateX(-50%);
     font-size:26px;font-weight:bold;color:#ffeb3b;
     text-shadow:2px 2px 0 #000;pointer-events:none;z-index:6;
-    opacity:0;transition:opacity .2s;
-  }
+    opacity:0;transition:opacity .2s;}
   #combo.show{opacity:1;}
-  #overlay{
-    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(0,0,0,.75);color:#fff;font-size:26px;text-align:center;
-    flex-direction:column;cursor:pointer;z-index:10;padding:20px;
-  }
+    flex-direction:column;cursor:pointer;z-index:10;padding:20px;}
   #overlay.hidden{display:none;}
   #msg{max-width:90%;line-height:1.4;white-space:pre-line;text-shadow:2px 2px 0 #000;}
   #hint{font-size:16px;margin-top:24px;opacity:.85;}
-  .btn{
-    margin-top:16px;padding:10px 24px;font-size:16px;
+  .btn{margin-top:16px;padding:10px 24px;font-size:16px;
     background:#3498db;color:#fff;border:2px solid #fff;border-radius:8px;
-    cursor:pointer;font-family:inherit;
-  }
-  .btn:hover{background:#2980b9;}
+    cursor:pointer;font-family:inherit;}
   .btn.red{background:#e74c3c;}
-  .btn.red:hover{background:#c0392b;}
 </style>
 </head>
 <body>
@@ -73,53 +50,34 @@
 </div>
 
 <script>
-(() => {
+(function(){
 'use strict';
 
-// ==================== КОНСТАНТЫ ====================
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const W = canvas.width;
-const H = canvas.height;
+// ========== КОНСТАНТЫ ==========
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
 
-const GRAVITY = 1600;
-const JUMP_HEIGHT = H * (2/3);
-const JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
+var GRAVITY = 1600;
+var JUMP_HEIGHT = H * (2/3);
+var JUMP_POWER = -Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 
-const START_TIME       = 60;
-const TIME_BONUS_BASE  = 12;
-const TIME_BONUS_COMBO = 2;
-const TIME_PENALTY     = 1;
-const TIME_CLOCK_BONUS = 6;
-const MAX_TIME         = 180;
-const BASE_TIME_SCALE  = 0.85;
-const LOW_LIFE_SCALE   = 0.6;
-const PAUSE_BETWEEN    = 0.6;
+var START_TIME = 60, TIME_BONUS_BASE = 12, TIME_BONUS_COMBO = 2;
+var TIME_PENALTY = 1, TIME_CLOCK_BONUS = 6, MAX_TIME = 180;
+var BASE_TIME_SCALE = 0.85, LOW_LIFE_SCALE = 0.6, PAUSE_BETWEEN = 0.6;
+var MAX_LIVES = 5, LIFE_REGEN_EVERY = 8;
+var BREATHER_EVERY = 5, BREATHER_DURATION = 12, BREATHER_LOOSEN = 1.5;
+var MAX_ITEMS = 30, HUD_THROTTLE_MS = 100, SOUND_THROTTLE_MS = 60;
 
-const MAX_LIVES           = 5;
-const LIFE_REGEN_EVERY    = 8;
-const BREATHER_EVERY      = 5;
-const BREATHER_DURATION   = 12;
-const BREATHER_LOOSEN     = 1.5;
-
-const MAX_ITEMS           = 30;
-const HUD_THROTTLE_MS     = 100;
-const SOUND_THROTTLE_MS   = 60;
-
-const TYPES = {
-  red:    {emoji:'🔴', name:'красный шарик'},
-  blue:   {emoji:'🔵', name:'синий шарик'},
-  green:  {emoji:'🟢', name:'зелёный шарик'},
-  cake:   {emoji:'🍰', name:'тортик'},
-  star:   {emoji:'⭐', name:'звезда'},
-  apple:  {emoji:'🍎', name:'яблоко'},
-  bomb:   {emoji:'💣', name:'бомба'},
-  clock:  {emoji:'⏰', name:'часы'}
+var TYPES = {
+  red:{e:'🔴'}, blue:{e:'🔵'}, green:{e:'🟢'},
+  cake:{e:'🍰'}, star:{e:'⭐'}, apple:{e:'🍎'},
+  bomb:{e:'💣'}, clock:{e:'⏰'}
 };
 
-// ==================== ЗАДАНИЯ ====================
+// ========== ЗАДАНИЯ ==========
 function makeTask(num){
-  const templates = [
+  var tmpl = [
     [{type:'red', n:3}],
     [{type:'red', n:2},{type:'cake', n:1}],
     [{type:'star', n:3}],
@@ -131,154 +89,132 @@ function makeTask(num){
     [{type:'star', n:4},{type:'cake', n:2}],
     [{type:'green', n:2},{type:'red', n:2},{type:'blue', n:2},{type:'star', n:1}]
   ];
-  const cycle = Math.floor((num - 1) / templates.length);
-  const tmpl = templates[(num - 1) % templates.length];
-  const extra = Math.floor(cycle / 3);
-  return tmpl.map((t, i) => ({
-    type: t.type,
-    n: t.n + (extra > 0 && i === 0 ? extra : 0)
-  }));
+  var cycle = Math.floor((num - 1) / tmpl.length);
+  var base = tmpl[(num - 1) % tmpl.length];
+  var extra = Math.floor(cycle / 3);
+  var out = [];
+  for(var i = 0; i < base.length; i++){
+    out.push({ type: base[i].type, n: base[i].n + (extra > 0 && i === 0 ? extra : 0) });
+  }
+  return out;
 }
 
 function taskDifficulty(num){
-  const smooth = Math.sqrt(num);
+  var s = Math.sqrt(num);
   return {
-    spawnInterval: Math.max(0.55, 1.1 - smooth * 0.06),
-    fallSpeed:     120 + smooth * 9,
-    bombChance:    Math.min(0.18, 0.05 + smooth * 0.012),
+    spawnInterval: Math.max(0.55, 1.1 - s * 0.06),
+    fallSpeed:     120 + s * 9,
+    bombChance:    Math.min(0.18, 0.05 + s * 0.012),
     clockChance:   0.08
   };
 }
 
-function isBreather(num){
-  return num > 0 && num % BREATHER_EVERY === 0;
-}
+function isBreather(n){ return n > 0 && n % BREATHER_EVERY === 0; }
 
-// ==================== СОСТОЯНИЕ ====================
-const state = {
-  lives: 3,
-  timeLeft: START_TIME,
-  taskNum: 1,
-  tasksDone: 0,
-  task: [],
-  collected: {},
-  combo: 0,
-  running: false,
-  starting: false,
-  items: [],
-  spawnTimer: 0,
-  lastTime: 0,
-  cfg: null,
-  started: false,
-  pauseTimer: 0,
-  breatherTimer: 0,
-  rafId: 0,
-  lastHudUpdate: 0,
-  clearItemsNextFrame: false,
+// ========== СОСТОЯНИЕ ==========
+var state = {
+  lives: 3, timeLeft: START_TIME, taskNum: 1, tasksDone: 0,
+  task: [], collected: {}, combo: 0,
+  running: false, starting: false,
+  items: [], spawnTimer: 0, lastTime: 0, cfg: null,
+  pauseTimer: 0, breatherTimer: 0, rafId: 0,
+  lastHudUpdate: 0, clearItemsNextFrame: false,
   flashes: [],
   bestTasks: Number(localStorage.getItem('lion_bestTasks') || 0),
   bestTime: Number(localStorage.getItem('lion_bestTime') || 0),
   bestSession: Number(localStorage.getItem('lion_bestSession') || 0)
 };
 
-// ==================== ЛЬВЁНОК ====================
-const lion = {
-  x: W/2, y: H-120, w: 70, h: 70,
-  vy: 0,
-  jumpPower: JUMP_POWER,
-  justBounced: false
+var lion = {
+  x: W/2, y: H-120, w: 70, h: 70, vy: 0,
+  jumpPower: JUMP_POWER, justBounced: false
 };
 
-const trampoline = { x: W/2 - 130, y: H - 60, w: 260, h: 18 };
+var trampoline = { x: W/2 - 130, y: H - 60, w: 260, h: 18 };
 
-// ==================== ВВОД ====================
-const keys = {};
-addEventListener('keydown', e => {
+// ========== ВВОД ==========
+var keys = {};
+window.addEventListener('keydown', function(e){
   keys[e.key] = true;
-  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key) >= 0) e.preventDefault();
 });
-addEventListener('keyup', e => { keys[e.key] = false; });
+window.addEventListener('keyup', function(e){ keys[e.key] = false; });
 
-let pointerX = null;
-let usePointer = false;
-
+var pointerX = null, usePointer = false;
 function pointerMove(clientX){
-  const rect = canvas.getBoundingClientRect();
-  const scale = W / rect.width;
-  pointerX = (clientX - rect.left) * scale;
+  var rect = canvas.getBoundingClientRect();
+  pointerX = (clientX - rect.left) * (W / rect.width);
   usePointer = true;
 }
-canvas.addEventListener('mousemove', e => pointerMove(e.clientX));
-canvas.addEventListener('mouseleave', () => { pointerX = null; });
-canvas.addEventListener('touchstart', e => { pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
-canvas.addEventListener('touchmove',  e => { pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
-canvas.addEventListener('touchend',   () => { pointerX = null; });
+canvas.addEventListener('mousemove', function(e){ pointerMove(e.clientX); });
+canvas.addEventListener('mouseleave', function(){ pointerX = null; });
+canvas.addEventListener('touchstart', function(e){ pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchmove',  function(e){ pointerMove(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchend',   function(){ pointerX = null; });
 
-// ==================== HUD ====================
-const hudLives = document.getElementById('lives');
-const hudTime  = document.getElementById('time');
-const hudTaskNum = document.getElementById('taskNum');
-const hudTask  = document.getElementById('task');
-const comboEl  = document.getElementById('combo');
-const overlay  = document.getElementById('overlay');
-const msgEl    = document.getElementById('msg');
-const hintEl   = document.getElementById('hint');
-const resetBtn = document.getElementById('resetBtn');
+// ========== HUD ==========
+var hudLives = document.getElementById('lives');
+var hudTime  = document.getElementById('time');
+var hudTaskNum = document.getElementById('taskNum');
+var hudTask  = document.getElementById('task');
+var comboEl  = document.getElementById('combo');
+var overlay  = document.getElementById('overlay');
+var msgEl    = document.getElementById('msg');
+var hintEl   = document.getElementById('hint');
+var resetBtn = document.getElementById('resetBtn');
 
-let hudCache = { lives:-1, time:-1, taskNum:-1, text:'' };
+var hudCache = { lives:-1, time:-1, taskNum:-1, text:'' };
 
 function updateHUD(force){
-  const now = performance.now();
+  var now = performance.now();
   if(!force && now - state.lastHudUpdate < HUD_THROTTLE_MS) return;
   state.lastHudUpdate = now;
 
-  const lives = state.lives;
-  const time  = Math.max(0, Math.ceil(state.timeLeft));
-  const tnum  = state.taskNum;
+  var lives = state.lives;
+  var time  = Math.max(0, Math.ceil(state.timeLeft));
+  var tnum  = state.taskNum;
 
   if(lives !== hudCache.lives){ hudLives.textContent = lives; hudCache.lives = lives; }
-  if(time  !== hudCache.time ){ hudTime.textContent  = time;  hudCache.time  = time;  }
+  if(time  !== hudCache.time ){ hudTime.textContent  = time;  hudCache.time  = time; }
   if(tnum  !== hudCache.taskNum){ hudTaskNum.textContent = tnum; hudCache.taskNum = tnum; }
 
-  const parts = state.task.map(t => {
-    const got = state.collected[t.type] || 0;
-    const done = got >= t.n;
-    return `${done?'✅':''}${got}/${t.n} ${TYPES[t.type].emoji}`;
-  });
-  let text = 'Задание: ' + parts.join('  ');
+  var parts = [];
+  for(var i = 0; i < state.task.length; i++){
+    var t = state.task[i];
+    var got = state.collected[t.type] || 0;
+    var done = got >= t.n;
+    parts.push((done ? '✅' : '') + got + '/' + t.n + ' ' + TYPES[t.type].e);
+  }
+  var text = 'Задание: ' + parts.join('  ');
   if(state.breatherTimer > 0){
-    text = `☕ ПЕРЕДЫШКА ${Math.ceil(state.breatherTimer)}с  •  ` + text;
+    text = '☕ ПЕРЕДЫШКА ' + Math.ceil(state.breatherTimer) + 'с  •  ' + text;
   }
-  if(text !== hudCache.text){
-    hudTask.textContent = text;
-    hudCache.text = text;
-  }
+  if(text !== hudCache.text){ hudTask.textContent = text; hudCache.text = text; }
 }
 
 function showCombo(){
   if(state.combo < 2){ comboEl.classList.remove('show'); return; }
-  comboEl.textContent = `🔥 Комбо ×${state.combo}`;
+  comboEl.textContent = '🔥 Комбо ×' + state.combo;
   comboEl.classList.add('show');
   clearTimeout(showCombo._t);
-  showCombo._t = setTimeout(()=>comboEl.classList.remove('show'), 1200);
+  showCombo._t = setTimeout(function(){ comboEl.classList.remove('show'); }, 1200);
 }
 
-// ==================== CANVAS ВСПЫШКИ ====================
-function flash(text, color='#fff'){
-  state.flashes.push({ text, color, life: 0.75, t: 0.75 });
+// ========== ВСПЫШКИ (на canvas, без DOM) ==========
+function flash(text, color){
+  state.flashes.push({ text: text, color: color || '#fff', life: 0.75, t: 0.75 });
   if(state.flashes.length > 5) state.flashes.shift();
 }
 
 function drawFlashes(dt){
-  for(let i = state.flashes.length - 1; i >= 0; i--){
-    const f = state.flashes[i];
+  for(var i = state.flashes.length - 1; i >= 0; i--){
+    var f = state.flashes[i];
     f.t -= dt;
     if(f.t <= 0){ state.flashes.splice(i, 1); continue; }
-
-    const progress = 1 - f.t / f.life;
-    const y = 120 - progress * 40;
-    const alpha = f.t > 0.3 ? 1 : f.t / 0.3;
-    const scale = progress < 0.2 ? 0.6 + progress * 2 : 1.1 - (progress - 0.2) * 0.15;
+    var progress = 1 - f.t / f.life;
+    var y = 120 - progress * 40;
+    var alpha = f.t > 0.3 ? 1 : f.t / 0.3;
+    var scale = progress < 0.2 ? 0.6 + progress * 2 : 1.1 - (progress - 0.2) * 0.15;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -296,52 +232,45 @@ function drawFlashes(dt){
   }
 }
 
-// ==================== ЗВУК ====================
-const Sound = {
-  ctx: null,
-  lastPlay: {},
-  init(){
+// ========== ЗВУК ==========
+var Sound = {
+  ctx: null, lastPlay: {},
+  init: function(){
     if(!this.ctx){
-      try {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      } catch(e){ this.ctx = null; }
+      try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch(e){ this.ctx = null; }
     }
-    if(this.ctx && this.ctx.state === 'suspended'){
-      this.ctx.resume().catch(()=>{});
-    }
+    if(this.ctx && this.ctx.state === 'suspended'){ this.ctx.resume().catch(function(){}); }
   },
-  beep(freq, dur, type='sine', vol=0.15, key='main'){
-    const now = performance.now();
-    const last = this.lastPlay[key] || 0;
+  beep: function(freq, dur, type, vol, key){
+    var now = performance.now();
+    var last = this.lastPlay[key] || 0;
     if(now - last < SOUND_THROTTLE_MS) return;
     this.lastPlay[key] = now;
-
     try{
       this.init();
       if(!this.ctx) return;
-      const t0 = this.ctx.currentTime;
-      const o = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-      o.type = type;
-      o.frequency.value = freq;
+      var t0 = this.ctx.currentTime;
+      var o = this.ctx.createOscillator();
+      var g = this.ctx.createGain();
+      o.type = type; o.frequency.value = freq;
       g.gain.setValueAtTime(vol, t0);
       g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
       o.connect(g); g.connect(this.ctx.destination);
-      o.start(t0);
-      o.stop(t0 + dur);
-      o.onended = () => { try { o.disconnect(); g.disconnect(); } catch(e){} };
+      o.start(t0); o.stop(t0 + dur);
+      o.onended = function(){ try { o.disconnect(); g.disconnect(); } catch(e){} };
     }catch(e){}
   },
-  jump(){ this.beep(440, 0.12, 'square', 0.08, 'jump'); },
-  collect(){ this.beep(880, 0.1, 'sine', 0.12, 'collect'); },
-  wrong(){ this.beep(180, 0.2, 'sawtooth', 0.12, 'wrong'); },
-  win(){ this.beep(784, 0.18, 'sine', 0.14, 'win'); },
-  fail(){ this.beep(200, 0.4, 'sawtooth', 0.14, 'fail'); },
-  clock(){ this.beep(1400, 0.1, 'sine', 0.14, 'clock'); },
-  regen(){ this.beep(1100, 0.2, 'sine', 0.16, 'regen'); }
+  jump:    function(){ this.beep(440, 0.12, 'square', 0.08, 'jump'); },
+  collect: function(){ this.beep(880, 0.10, 'sine',   0.12, 'collect'); },
+  wrong:   function(){ this.beep(180, 0.20, 'sawtooth', 0.12, 'wrong'); },
+  win:     function(){ this.beep(784, 0.18, 'sine',   0.14, 'win'); },
+  fail:    function(){ this.beep(200, 0.40, 'sawtooth', 0.14, 'fail'); },
+  clock:   function(){ this.beep(1400, 0.10, 'sine',  0.14, 'clock'); },
+  regen:   function(){ this.beep(1100, 0.20, 'sine',  0.16, 'regen'); }
 };
 
-// ==================== ЗАПУСК ИГРЫ ====================
+// ========== ЗАПУСК ==========
 function startGame(){
   if(state.starting) return;
   state.starting = true;
@@ -368,7 +297,6 @@ function startGame(){
 
   Sound.init();
 
-  state.cfg = taskDifficulty(1);
   buildTask(1);
 
   state.running = true;
@@ -382,7 +310,9 @@ function startGame(){
 function buildTask(num){
   state.task = makeTask(num);
   state.collected = {};
-  state.task.forEach(t => state.collected[t.type] = 0);
+  for(var i = 0; i < state.task.length; i++){
+    state.collected[state.task[i].type] = 0;
+  }
   state.cfg = taskDifficulty(num);
 
   if(isBreather(num)){
@@ -394,32 +324,36 @@ function buildTask(num){
   updateHUD(true);
 }
 
-// ==================== СПАВН ====================
+// ========== СПАВН ==========
 function spawnItem(){
   if(state.items.length >= MAX_ITEMS) return;
 
-  const cfg = state.cfg;
-  const inBreather = state.breatherTimer > 0;
-  const bombChance = inBreather ? cfg.bombChance / BREATHER_LOOSEN : cfg.bombChance;
+  var cfg = state.cfg;
+  var inBreather = state.breatherTimer > 0;
+  var bombChance = inBreather ? cfg.bombChance / BREATHER_LOOSEN : cfg.bombChance;
 
-  let type;
-  const r = Math.random();
+  var type;
+  var r = Math.random();
   if(r < bombChance){
     type = 'bomb';
   } else if(r < bombChance + cfg.clockChance){
     type = 'clock';
   } else {
     if(Math.random() < 0.6){
-      const need = state.task.filter(t => (state.collected[t.type] || 0) < t.n);
+      var need = [];
+      for(var i = 0; i < state.task.length; i++){
+        var t = state.task[i];
+        if((state.collected[t.type] || 0) < t.n) need.push(t.type);
+      }
       if(need.length){
-        type = need[Math.floor(Math.random() * need.length)].type;
+        type = need[Math.floor(Math.random() * need.length)];
       } else {
-        const pool = Object.keys(TYPES).filter(k => k !== 'bomb' && k !== 'clock');
-        type = pool[Math.floor(Math.random() * pool.length)];
+        var pool0 = ['red','blue','green','cake','star','apple'];
+        type = pool0[Math.floor(Math.random() * pool0.length)];
       }
     } else {
-      const pool = Object.keys(TYPES).filter(k => k !== 'bomb' && k !== 'clock');
-      type = pool[Math.floor(Math.random() * pool.length)];
+      var pool1 = ['red','blue','green','cake','star','apple'];
+      type = pool1[Math.floor(Math.random() * pool1.length)];
     }
   }
 
@@ -427,15 +361,14 @@ function spawnItem(){
     x: 60 + Math.random() * (W - 120),
     y: -40,
     r: 22,
-    type,
+    type: type,
     vy: cfg.fallSpeed * (0.85 + Math.random() * 0.3),
     rot: 0
   });
 }
 
-// ==================== ОБНОВЛЕНИЕ ====================
+// ========== ОБНОВЛЕНИЕ ==========
 function update(dt){
-  // Отложенная очистка items (безопасно, вне итерации)
   if(state.clearItemsNextFrame){
     state.items.length = 0;
     state.clearItemsNextFrame = false;
@@ -456,8 +389,8 @@ function update(dt){
     }
   }
 
-  const lifeScale = state.lives === 1 ? LOW_LIFE_SCALE : 1.0;
-  const timeScale = BASE_TIME_SCALE * lifeScale;
+  var lifeScale = state.lives === 1 ? LOW_LIFE_SCALE : 1.0;
+  var timeScale = BASE_TIME_SCALE * lifeScale;
 
   state.timeLeft -= dt * timeScale;
   if(state.timeLeft <= 0){
@@ -473,42 +406,46 @@ function update(dt){
   state.spawnTimer -= dt;
   if(state.spawnTimer <= 0){
     spawnItem();
-    let interval = state.cfg.spawnInterval;
+    var interval = state.cfg.spawnInterval;
     if(state.breatherTimer > 0) interval *= BREATHER_LOOSEN;
     state.spawnTimer = interval;
   }
 
-  for(let i = state.items.length - 1; i >= 0; i--){
-    if(i >= state.items.length) continue;
-    const it = state.items[i];
-    if(!it) continue;
+  // Итерируем по копии, чтобы безопасно удалять из оригинала
+  var snapshot = state.items.slice();
+  for(var i = 0; i < snapshot.length; i++){
+    var it = snapshot[i];
+    // Может быть удалён предыдущим catchItem
+    if(state.items.indexOf(it) < 0) continue;
 
     it.y += it.vy * dt * timeScale;
     it.rot += dt * 2.5;
 
-    const dx = it.x - lion.x;
-    const dy = it.y - (lion.y + lion.h/2);
-    const rad = it.r + lion.w/2 - 12;
+    var dx = it.x - lion.x;
+    var dy = it.y - (lion.y + lion.h/2);
+    var rad = it.r + lion.w/2 - 12;
     if(dx*dx + dy*dy < rad*rad){
       catchItem(it);
       if(!state.running) return;
-      if(i < state.items.length && state.items[i] === it){
-        state.items.splice(i, 1);
-      }
+      var idx = state.items.indexOf(it);
+      if(idx >= 0) state.items.splice(idx, 1);
       continue;
     }
-    if(it.y > H + 60) state.items.splice(i, 1);
+    if(it.y > H + 60){
+      var idx2 = state.items.indexOf(it);
+      if(idx2 >= 0) state.items.splice(idx2, 1);
+    }
   }
 }
 
 function updateLion(dt, timeScale){
-  const speed = 420;
-  let ax = 0;
+  var speed = 420;
+  var ax = 0;
   if(keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
   if(keys['ArrowRight']|| keys['d'] || keys['D']) ax += 1;
 
   if(usePointer && pointerX !== null && ax === 0){
-    const diff = pointerX - lion.x;
+    var diff = pointerX - lion.x;
     if(Math.abs(diff) > 6){
       ax = Math.sign(diff) * Math.min(1, Math.abs(diff) / 100);
     }
@@ -523,11 +460,11 @@ function updateLion(dt, timeScale){
   lion.vy += GRAVITY * dt * timeScale;
   lion.y += lion.vy * dt * timeScale;
 
-  const lionBottom = lion.y + lion.h;
+  var lionBottom = lion.y + lion.h;
   if(lionBottom >= trampoline.y && lion.vy > 0){
-    const overTrampoline = lion.x + lion.w/2 > trampoline.x &&
-                           lion.x - lion.w/2 < trampoline.x + trampoline.w;
-    if(overTrampoline){
+    var over = lion.x + lion.w/2 > trampoline.x &&
+               lion.x - lion.w/2 < trampoline.x + trampoline.w;
+    if(over){
       lion.y = trampoline.y - lion.h;
       lion.vy = lion.jumpPower;
       if(!lion.justBounced){ Sound.jump(); lion.justBounced = true; }
@@ -541,13 +478,13 @@ function updateLion(dt, timeScale){
   }
 }
 
-// ==================== ЛОВЛЯ ====================
+// ========== ЛОВЛЯ ==========
 function catchItem(it){
-  const inBreather = state.breatherTimer > 0;
+  var inBreather = state.breatherTimer > 0;
 
   if(it.type === 'clock'){
     state.timeLeft = Math.min(MAX_TIME, state.timeLeft + TIME_CLOCK_BONUS);
-    flash(`⏰ +${TIME_CLOCK_BONUS}с`, '#7CFC00');
+    flash('⏰ +' + TIME_CLOCK_BONUS + 'с', '#7CFC00');
     Sound.clock();
     updateHUD(true);
     return;
@@ -558,7 +495,7 @@ function catchItem(it){
       state.lives--;
       state.combo = 0;
       state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
-      flash(`💣 −${TIME_PENALTY}с  ❤️-1`, '#ff5555');
+      flash('💣 −' + TIME_PENALTY + 'с  ❤️-1', '#ff5555');
     } else {
       flash('💣 (передышка)', '#ffaa00');
     }
@@ -568,20 +505,27 @@ function catchItem(it){
     return;
   }
 
-  const taskItem = state.task.find(t => t.type === it.type);
+  var taskItem = null;
+  for(var i = 0; i < state.task.length; i++){
+    if(state.task[i].type === it.type){ taskItem = state.task[i]; break; }
+  }
+
   if(taskItem && state.collected[it.type] < taskItem.n){
     state.collected[it.type]++;
     Sound.collect();
     updateHUD(true);
-    if(state.task.every(t => state.collected[t.type] >= t.n)){
-      completeTask();
+    var allDone = true;
+    for(var j = 0; j < state.task.length; j++){
+      var t = state.task[j];
+      if((state.collected[t.type] || 0) < t.n){ allDone = false; break; }
     }
+    if(allDone) completeTask();
   } else {
     if(!inBreather){
       state.lives--;
       state.combo = 0;
       state.timeLeft = Math.max(1, state.timeLeft - TIME_PENALTY);
-      flash(`❌ Лишний  −${TIME_PENALTY}с  ❤️-1`, '#ffaa00');
+      flash('❌ Лишний  −' + TIME_PENALTY + 'с  ❤️-1', '#ffaa00');
     } else {
       flash('❌ (передышка)', '#ffaa00');
     }
@@ -591,14 +535,14 @@ function catchItem(it){
   }
 }
 
-// ==================== ЗАДАНИЕ ВЫПОЛНЕНО ====================
+// ========== ЗАДАНИЕ ВЫПОЛНЕНО ==========
 function completeTask(){
   state.combo++;
   state.tasksDone++;
 
-  const bonus = TIME_BONUS_BASE + state.combo * TIME_BONUS_COMBO;
+  var bonus = TIME_BONUS_BASE + state.combo * TIME_BONUS_COMBO;
   state.timeLeft = Math.min(MAX_TIME, state.timeLeft + bonus);
-  flash(`✅ +${bonus}с  (комбо ×${state.combo})`, '#7CFC00');
+  flash('✅ +' + bonus + 'с  (комбо ×' + state.combo + ')', '#7CFC00');
   Sound.win();
   showCombo();
 
@@ -619,25 +563,23 @@ function completeTask(){
 
   state.taskNum++;
   buildTask(state.taskNum);
-
   state.pauseTimer = PAUSE_BETWEEN;
-  // Отложенная очистка — безопасно, не во время итерации
   state.clearItemsNextFrame = true;
 }
 
-// ==================== ОТРИСОВКА ====================
+// ========== ОТРИСОВКА ==========
 function draw(dt){
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  var grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, '#87CEEB');
   grad.addColorStop(1, '#FFE4B5');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  const t = performance.now() * 0.02;
-  for(let i = 0; i < 5; i++){
-    const x = ((i * 220 + t) % (W + 200)) - 100;
-    const y = 60 + (i % 3) * 40;
+  var t = performance.now() * 0.02;
+  for(var i = 0; i < 5; i++){
+    var x = ((i * 220 + t) % (W + 200)) - 100;
+    var y = 60 + (i % 3) * 40;
     ctx.beginPath();
     ctx.arc(x, y, 32, 0, Math.PI*2);
     ctx.arc(x + 30, y + 8, 26, 0, Math.PI*2);
@@ -663,17 +605,17 @@ function draw(dt){
   ctx.font = '40px serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for(let i = 0; i < state.items.length; i++){
-    const it = state.items[i];
+  for(var k = 0; k < state.items.length; k++){
+    var it = state.items[k];
     if(!it) continue;
     ctx.save();
     ctx.translate(it.x, it.y);
     ctx.rotate(Math.sin(it.rot) * 0.35);
-    ctx.fillText(TYPES[it.type].emoji, 0, 0);
+    ctx.fillText(TYPES[it.type].e, 0, 0);
     ctx.restore();
   }
 
-  const shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
+  var shadowScale = Math.max(0.3, 1 - (H - lion.y - lion.h) / 500);
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
   ctx.ellipse(lion.x, trampoline.y + 2, 35 * shadowScale, 8 * shadowScale, 0, 0, Math.PI*2);
@@ -703,9 +645,108 @@ function draw(dt){
     ctx.strokeRect(3, 3, W-6, H-6);
   }
 
-  // Полоска таймера
-  const p = Math.max(0, Math.min(1, state.timeLeft / MAX_TIME));
+  var p = Math.max(0, Math.min(1, state.timeLeft / MAX_TIME));
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, H - 10, W, 10);
-  const color = state.timeLeft < 8 ? '#e74c3c' :
-                state
+  var color = state.timeLeft < 8 ? '#e74c3c' :
+              state.timeLeft < 20 ? '#f39c12' : '#2ecc71';
+  ctx.fillStyle = color;
+  ctx.fillRect(0, H - 10, W * p, 10);
+
+  drawFlashes(dt);
+}
+
+function roundRect(x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ========== ЦИКЛ ==========
+function loop(t){
+  if(!state.running) return;
+  var dt = (t - state.lastTime) / 1000;
+  if(dt > 0.05) dt = 0.05;
+  if(dt < 0) dt = 0;
+  state.lastTime = t;
+
+  update(dt);
+
+  if(state.running){
+    draw(dt);
+    state.rafId = requestAnimationFrame(loop);
+  }
+}
+
+// ========== ИГРА ОКОНЧЕНА ==========
+function gameOver(){
+  state.running = false;
+  if(state.rafId){ cancelAnimationFrame(state.rafId); state.rafId = 0; }
+  Sound.fail();
+
+  var sessionTasks = state.taskNum - 1;
+  if(sessionTasks > state.bestSession){
+    state.bestSession = sessionTasks;
+    localStorage.setItem('lion_bestSession', state.bestSession);
+  }
+
+  var recordMsg =
+    '🏆 Рекорды:\n' +
+    'Заданий подряд: ' + state.bestTasks + '\n' +
+    'Макс. время: ' + state.bestTime + 'с\n' +
+    'Лучшая сессия: ' + state.bestSession + ' заданий\n\n' +
+    'В этот раз:\n' +
+    'Заданий: ' + sessionTasks + '\n' +
+    'Осталось времени: ' + Math.floor(state.timeLeft) + 'с';
+
+  showOverlay(recordMsg, 'Нажми, чтобы играть заново', true, function(){
+    startGame();
+  });
+}
+
+function showOverlay(text, hint, showReset, cb){
+  msgEl.textContent = text;
+  hintEl.textContent = hint;
+  resetBtn.style.display = showReset ? 'inline-block' : 'none';
+  overlay.classList.remove('hidden');
+  overlay.onclick = function(e){
+    if(e.target === resetBtn) return;
+    overlay.classList.add('hidden');
+    cb();
+  };
+  resetBtn.onclick = function(e){
+    e.stopPropagation();
+    localStorage.removeItem('lion_bestTasks');
+    localStorage.removeItem('lion_bestTime');
+    localStorage.removeItem('lion_bestSession');
+    state.bestTasks = 0;
+    state.bestTime = 0;
+    state.bestSession = 0;
+    flash('Рекорды сброшены', '#fff');
+  };
+}
+
+// ========== СТАРТ ==========
+overlay.onclick = function(){
+  overlay.classList.add('hidden');
+  startGame();
+};
+
+// Ресайз
+function fitCanvas(){
+  var wrap = document.getElementById('wrap');
+  var scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H);
+  canvas.style.width  = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+})();
+</script>
+</body>
+</html>
